@@ -16,8 +16,8 @@ clean:
 
 .PHONY: run
 run:
-	./build/mlp_learning_an_image data/images/albert.jpg data/config_hash.json 1001
+	./build/mlp_learning_an_image data/images/albert.jpg data/config_hash.json 1000 inference.jpg
 
-.PHONY: run-one-step
-run-one-step:
-	./build/mlp_learning_an_image data/images/albert.jpg data/config_hash.json 1
+.PHONY: run-steps
+run-steps:
+	./build/mlp_learning_an_image data/images/albert.jpg data/config_hash.json $(STEPS) inference.jpg
