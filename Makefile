@@ -2,13 +2,17 @@
 config:
 	cmake -S . -B ./build -DCMAKE_BUILD_TYPE=RelWithDebInfo
 
+.PHONY: config-debug
+config-debug:
+	cmake -S . -B ./build -DCMAKE_BUILD_TYPE=Debug
+
 .PHONY: build
 build:
 	cmake --build build --config RelWithDebInfo -j
 
-.PHONY: build-verbose
-build-verbose:
-	cmake --build build --config RelWithDebInfo -j --verbose
+.PHONY: build-debug
+build-debug:
+	cmake --build build --config Debug -j
 
 .PHONY: clean
 clean:
