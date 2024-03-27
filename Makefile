@@ -10,6 +10,10 @@ config-debug:
 build:
 	cmake --build build --config RelWithDebInfo -j
 
+.PHONY: build-sequentially
+build-sequentially:
+	cmake --build build --config RelWithDebInfo
+
 .PHONY: build-debug
 build-debug:
 	cmake --build build --config Debug -j
