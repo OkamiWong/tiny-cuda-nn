@@ -33,6 +33,8 @@
 #include <tiny-cuda-nn/cutlass_matmul.h>
 #include <tiny-cuda-nn/multi_stream.h>
 
+#include <memory-optimizer/preflight.h>
+
 namespace tcnn {
 
 template <typename T>
@@ -175,7 +177,13 @@ std::unique_ptr<Context> CutlassMLP<T>::forward_impl(cudaStream_t stream, const 
 	// Run the actual network
 	uint32_t tmp_idx = 0;
 
-	bool fused = compute_layer<FullLayer>(
+  preflight::registerKernel({
+		(GPUMatrixBase *)&input_weight_matrix(use_inference_params),
+		(GPUMatrixBase *)&input,
+		(GPUMatrixBase *)&(forward->hidden.at(tmp_idx)),
+		(GPUMatrixBase *)&(m_can_fuse_activation ? forward->hidden.at(tmp_idx) : forward->hidden.at(tmp_idx + 1))
+	});
+  bool fused = compute_layer<FullLayer>(
 		stream,
 		false,
 		m_activation,
@@ -188,6 +196,12 @@ std::unique_ptr<Context> CutlassMLP<T>::forward_impl(cudaStream_t stream, const 
 
 	// layers
 	for (uint32_t i = 0; i < m_n_hidden_matmuls; ++i) {
+		preflight::registerKernel({
+			(GPUMatrixBase *)&weight_matrix_at(use_inference_params, i),
+			(GPUMatrixBase *)&(forward->hidden.at(tmp_idx-1)),
+			(GPUMatrixBase *)&(forward->hidden.at(tmp_idx)),
+			(GPUMatrixBase *)&(m_can_fuse_activation ? forward->hidden.at(tmp_idx) : forward->hidden.at(tmp_idx+1))
+		});
 		fused = compute_layer<FullLayer>(
 			stream,
 			false,
@@ -201,6 +215,11 @@ std::unique_ptr<Context> CutlassMLP<T>::forward_impl(cudaStream_t stream, const 
 	}
 
 	if (output) {
+		preflight::registerKernel({
+			(GPUMatrixBase *)&output_weight_matrix(use_inference_params),
+			(GPUMatrixBase *)&(forward->hidden.at(tmp_idx-1)),
+			(GPUMatrixBase *)output
+		});
 		compute_layer<LastLayer>(stream, false, m_output_activation, output_weight_matrix(use_inference_params), forward->hidden.at(tmp_idx-1), *output, *output);
 	}
 
@@ -268,10 +287,20 @@ void CutlassMLP<T>::backward_impl(
 	// Output layer
 	if (param_gradients_mode != GradientMode::Ignore) {
 		multi_streams.emplace_back(stream, 2);
+		preflight::registerKernel({
+			(GPUMatrixBase *)&dL_doutput,
+			(GPUMatrixBase *)&forward.hidden.at(tmp_idx),
+			(GPUMatrixBase *)&output_gradient_matrix()
+		});
 		fc_multiply_split_k<LastLayerK>(multi_streams.back().get(1), tmp_dL_doutput, forward.hidden.at(tmp_idx).transposed(), output_gradient_matrix(), split_k_factor, param_gradient_beta);
-
 	}
 
+	preflight::registerKernel({
+		(GPUMatrixBase *)&output_weight_matrix(use_inference_params),
+		(GPUMatrixBase *)&dL_doutput,
+		(GPUMatrixBase *)&forward.hidden.at(tmp_idx),
+		(GPUMatrixBase *)&backward_tmp.at(backward_tmp_idx)
+	});
 	if (!m_can_fuse_activation) {
 		fc_multiply<FullLayer>(stream, output_weight_matrix(use_inference_params).transposed(), tmp_dL_doutput, backward_tmp.at(backward_tmp_idx));
 		activation_backward_gpu(stream, m_activation, forward.hidden.at(tmp_idx-1), backward_tmp.at(backward_tmp_idx));
@@ -288,10 +317,21 @@ void CutlassMLP<T>::backward_impl(
 
 		if (param_gradients_mode != GradientMode::Ignore) {
 			multi_streams.emplace_back(stream, 2);
+			preflight::registerKernel({
+				(GPUMatrixBase *)&backward_tmp.at(backward_tmp_idx-1),
+				(GPUMatrixBase *)&forward.hidden.at(tmp_idx),
+				(GPUMatrixBase *)&gradient_matrix_at(matrix_idx)
+			});
 			fc_multiply_split_k<FullLayerK>(multi_streams.back().get(1), backward_tmp.at(backward_tmp_idx-1), forward.hidden.at(tmp_idx).transposed(), gradient_matrix_at(matrix_idx), split_k_factor, param_gradient_beta);
 		}
 
-		if (!m_can_fuse_activation) {
+    preflight::registerKernel({
+      (GPUMatrixBase *)&weight_matrix_at(use_inference_params, matrix_idx),
+			(GPUMatrixBase *)&backward_tmp.at(backward_tmp_idx-1),
+			(GPUMatrixBase *)&forward.hidden.at(tmp_idx),
+			(GPUMatrixBase *)&backward_tmp.at(backward_tmp_idx)
+    });
+    if (!m_can_fuse_activation) {
 			fc_multiply<FullLayer>(stream, weight_matrix_at(use_inference_params, matrix_idx).transposed(), backward_tmp.at(backward_tmp_idx-1), backward_tmp.at(backward_tmp_idx));
 			activation_backward_gpu(stream, m_activation, forward.hidden.at(tmp_idx-1), backward_tmp.at(backward_tmp_idx));
 		} else {
@@ -304,12 +344,22 @@ void CutlassMLP<T>::backward_impl(
 
 	if (param_gradients_mode != GradientMode::Ignore) {
 		multi_streams.emplace_back(stream, 2);
+		preflight::registerKernel({
+			(GPUMatrixBase *)&backward_tmp.at(backward_tmp_idx-1),
+			(GPUMatrixBase *)&input,
+			(GPUMatrixBase *)&input_gradient_matrix()
+		});
 		fc_multiply_split_k<FullLayerK>(multi_streams.back().get(1), backward_tmp.at(backward_tmp_idx-1), input.transposed(), input_gradient_matrix(), split_k_factor, param_gradient_beta);
 	}
 
 	// If requested, compute sensitivity of loss w.r.t. inputs
 	if (dL_dinput) {
 		// optimization opportunity to only compute sensitivity w.r.t selected SUBSET of inputs. Useful for NFs, where conditional dims stay the same.
+		preflight::registerKernel({
+			(GPUMatrixBase *)&input_weight_matrix(use_inference_params),
+			(GPUMatrixBase *)&backward_tmp.at(backward_tmp_idx-1),
+			(GPUMatrixBase *)dL_dinput
+		});
 		fc_multiply<FullLayer>(stream, input_weight_matrix(use_inference_params).transposed(), backward_tmp.at(backward_tmp_idx-1), *dL_dinput);
 	}
 }

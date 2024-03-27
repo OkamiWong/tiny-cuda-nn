@@ -34,6 +34,8 @@
 #include <tiny-cuda-nn/common_device.h>
 #include <tiny-cuda-nn/loss.h>
 
+#include <memory-optimizer/preflight.h>
+
 namespace tcnn {
 
 template <typename T>
@@ -95,6 +97,13 @@ public:
 		CHECK_THROW(gradients.m() == stride);
 		CHECK_THROW(!data_pdf || data_pdf->m() == dims);
 
+		preflight::registerKernel({
+			(GPUMatrixBase *)&prediction,
+			(GPUMatrixBase *)&target,
+			(GPUMatrixBase *)&values,
+			(GPUMatrixBase *)&gradients,
+			(GPUMatrixBase *)data_pdf
+		});
 		linear_kernel(relative_l2_loss<T>, 0, stream,
 			prediction.n_elements(),
 			stride,

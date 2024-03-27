@@ -38,6 +38,8 @@
 #include <tiny-cuda-nn/multi_stream.h>
 #include <tiny-cuda-nn/random.h>
 
+#include <memory-optimizer/preflight.h>
+
 #include <stdexcept>
 #include <stdint.h>
 #include <string>
@@ -776,6 +778,11 @@ public:
 			forward->dy_dx = GPUMatrix<float, RM>{N_POS_DIMS * m_n_features, input.n(), synced_streams.get(0)};
 		}
 
+		preflight::registerKernel({
+			(GPUMatrixBase *)output,
+			&(forward->positions),
+			(GPUMatrixBase *)&(forward->dy_dx)
+		});
 		kernel_grid<T, N_POS_DIMS, N_FEATURES_PER_LEVEL, HASH_TYPE><<<blocks_hashgrid, N_THREADS_HASHGRID, 0, synced_streams.get(0)>>>(
 			num_elements,
 			m_n_features,
@@ -863,6 +870,10 @@ public:
 
 			const dim3 blocks_hashgrid = { div_round_up(num_elements * N_FEATURES_PER_LEVEL / N_FEATURES_PER_THREAD, N_THREADS_HASHGRID), m_n_levels, 1 };
 
+			preflight::registerKernel({
+				(GPUMatrixBase *)&(forward.positions.data() ? forward.positions: input),
+				(GPUMatrixBase *)&dL_doutput
+			});
 			kernel_grid_backward<T, grad_t, N_POS_DIMS, N_FEATURES_PER_LEVEL, N_FEATURES_PER_THREAD, HASH_TYPE><<<blocks_hashgrid, N_THREADS_HASHGRID, 0, stream>>>(
 				num_elements,
 				m_n_features,

@@ -34,6 +34,8 @@
 
 #include <stbi/stbi_wrapper.h>
 
+#include <memory-optimizer/preflight.h>
+
 #include <chrono>
 #include <cstdlib>
 #include <fstream>
@@ -312,6 +314,8 @@ int main(int argc, char* argv[]) {
 	} catch (const std::exception& e) {
 		std::cout << "Uncaught exception: " << e.what() << std::endl;
 	}
+
+	preflight::printResult();
 
 	return EXIT_SUCCESS;
 }
