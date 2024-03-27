@@ -97,7 +97,7 @@ public:
 		CHECK_THROW(gradients.m() == stride);
 		CHECK_THROW(!data_pdf || data_pdf->m() == dims);
 
-		preflight::registerKernel({
+		preflight::registerKernel(stream, {
 			(GPUMatrixBase *)&prediction,
 			(GPUMatrixBase *)&target,
 			(GPUMatrixBase *)&values,

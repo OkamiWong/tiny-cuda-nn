@@ -778,7 +778,7 @@ public:
 			forward->dy_dx = GPUMatrix<float, RM>{N_POS_DIMS * m_n_features, input.n(), synced_streams.get(0)};
 		}
 
-		preflight::registerKernel({
+		preflight::registerKernel(stream, {
 			(GPUMatrixBase *)output,
 			&(forward->positions),
 			(GPUMatrixBase *)&(forward->dy_dx)
@@ -870,7 +870,7 @@ public:
 
 			const dim3 blocks_hashgrid = { div_round_up(num_elements * N_FEATURES_PER_LEVEL / N_FEATURES_PER_THREAD, N_THREADS_HASHGRID), m_n_levels, 1 };
 
-			preflight::registerKernel({
+			preflight::registerKernel(stream, {
 				(GPUMatrixBase *)&(forward.positions.data() ? forward.positions: input),
 				(GPUMatrixBase *)&dL_doutput
 			});

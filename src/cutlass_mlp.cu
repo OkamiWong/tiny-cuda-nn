@@ -177,7 +177,7 @@ std::unique_ptr<Context> CutlassMLP<T>::forward_impl(cudaStream_t stream, const 
 	// Run the actual network
 	uint32_t tmp_idx = 0;
 
-  preflight::registerKernel({
+  preflight::registerKernel(stream, {
 		(GPUMatrixBase *)&input_weight_matrix(use_inference_params),
 		(GPUMatrixBase *)&input,
 		(GPUMatrixBase *)&(forward->hidden.at(tmp_idx)),
@@ -196,7 +196,7 @@ std::unique_ptr<Context> CutlassMLP<T>::forward_impl(cudaStream_t stream, const 
 
 	// layers
 	for (uint32_t i = 0; i < m_n_hidden_matmuls; ++i) {
-		preflight::registerKernel({
+		preflight::registerKernel(stream, {
 			(GPUMatrixBase *)&weight_matrix_at(use_inference_params, i),
 			(GPUMatrixBase *)&(forward->hidden.at(tmp_idx-1)),
 			(GPUMatrixBase *)&(forward->hidden.at(tmp_idx)),
@@ -215,7 +215,7 @@ std::unique_ptr<Context> CutlassMLP<T>::forward_impl(cudaStream_t stream, const 
 	}
 
 	if (output) {
-		preflight::registerKernel({
+		preflight::registerKernel(stream, {
 			(GPUMatrixBase *)&output_weight_matrix(use_inference_params),
 			(GPUMatrixBase *)&(forward->hidden.at(tmp_idx-1)),
 			(GPUMatrixBase *)output
@@ -287,7 +287,7 @@ void CutlassMLP<T>::backward_impl(
 	// Output layer
 	if (param_gradients_mode != GradientMode::Ignore) {
 		multi_streams.emplace_back(stream, 2);
-		preflight::registerKernel({
+		preflight::registerKernel(stream, {
 			(GPUMatrixBase *)&dL_doutput,
 			(GPUMatrixBase *)&forward.hidden.at(tmp_idx),
 			(GPUMatrixBase *)&output_gradient_matrix()
@@ -295,7 +295,7 @@ void CutlassMLP<T>::backward_impl(
 		fc_multiply_split_k<LastLayerK>(multi_streams.back().get(1), tmp_dL_doutput, forward.hidden.at(tmp_idx).transposed(), output_gradient_matrix(), split_k_factor, param_gradient_beta);
 	}
 
-	preflight::registerKernel({
+	preflight::registerKernel(stream, {
 		(GPUMatrixBase *)&output_weight_matrix(use_inference_params),
 		(GPUMatrixBase *)&dL_doutput,
 		(GPUMatrixBase *)&forward.hidden.at(tmp_idx),
@@ -317,7 +317,7 @@ void CutlassMLP<T>::backward_impl(
 
 		if (param_gradients_mode != GradientMode::Ignore) {
 			multi_streams.emplace_back(stream, 2);
-			preflight::registerKernel({
+			preflight::registerKernel(stream, {
 				(GPUMatrixBase *)&backward_tmp.at(backward_tmp_idx-1),
 				(GPUMatrixBase *)&forward.hidden.at(tmp_idx),
 				(GPUMatrixBase *)&gradient_matrix_at(matrix_idx)
@@ -325,7 +325,7 @@ void CutlassMLP<T>::backward_impl(
 			fc_multiply_split_k<FullLayerK>(multi_streams.back().get(1), backward_tmp.at(backward_tmp_idx-1), forward.hidden.at(tmp_idx).transposed(), gradient_matrix_at(matrix_idx), split_k_factor, param_gradient_beta);
 		}
 
-    preflight::registerKernel({
+    preflight::registerKernel(stream, {
       (GPUMatrixBase *)&weight_matrix_at(use_inference_params, matrix_idx),
 			(GPUMatrixBase *)&backward_tmp.at(backward_tmp_idx-1),
 			(GPUMatrixBase *)&forward.hidden.at(tmp_idx),
@@ -344,7 +344,7 @@ void CutlassMLP<T>::backward_impl(
 
 	if (param_gradients_mode != GradientMode::Ignore) {
 		multi_streams.emplace_back(stream, 2);
-		preflight::registerKernel({
+		preflight::registerKernel(stream, {
 			(GPUMatrixBase *)&backward_tmp.at(backward_tmp_idx-1),
 			(GPUMatrixBase *)&input,
 			(GPUMatrixBase *)&input_gradient_matrix()
@@ -355,7 +355,7 @@ void CutlassMLP<T>::backward_impl(
 	// If requested, compute sensitivity of loss w.r.t. inputs
 	if (dL_dinput) {
 		// optimization opportunity to only compute sensitivity w.r.t selected SUBSET of inputs. Useful for NFs, where conditional dims stay the same.
-		preflight::registerKernel({
+		preflight::registerKernel(stream, {
 			(GPUMatrixBase *)&input_weight_matrix(use_inference_params),
 			(GPUMatrixBase *)&backward_tmp.at(backward_tmp_idx-1),
 			(GPUMatrixBase *)dL_dinput
