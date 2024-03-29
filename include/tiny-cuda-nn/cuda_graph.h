@@ -150,8 +150,6 @@ public:
 				CUDA_CHECK_THROW(cudaGraphInstantiate(&m_graph_instance, m_graph, NULL, NULL, 0));
 			}
 
-			CUDA_CHECK_THROW(cudaGraphDebugDotPrint(m_graph, "graph.dot", 0));
-
 			CUDA_CHECK_THROW(cudaGraphLaunch(m_graph_instance, stream));
 		}};
 	}
