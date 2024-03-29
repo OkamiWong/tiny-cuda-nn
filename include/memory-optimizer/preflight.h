@@ -10,8 +10,13 @@
 namespace preflight {
 inline std::map<tcnn::GPUMatrixBase *, size_t> matrixAddressToSize;
 inline std::vector<std::set<tcnn::GPUMatrixBase *>> kernelDataDependencies;
+inline bool enabled = false;
 
 inline void registerKernel(cudaStream_t stream, std::vector<tcnn::GPUMatrixBase *> matrices) {
+  if (!enabled) {
+    return;
+  }
+
   cudaStreamCaptureStatus capture_status;
   CUDA_CHECK_THROW(cudaStreamIsCapturing(stream, &capture_status));
   if (capture_status == cudaStreamCaptureStatusNone) {
