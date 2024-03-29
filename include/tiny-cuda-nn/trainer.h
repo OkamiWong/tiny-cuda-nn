@@ -180,11 +180,11 @@ public:
 			auto capture_guard = m_graph.capture_guard(stream);
 			ctx = forward(stream, loss_scale, input, target, data_pdf, use_inference_params, dL_dinput, external_dL_dy);
 			backward(stream, *ctx, input, dL_dinput, use_inference_params, param_gradients_mode);
-		}
 
-		if (run_optimizer) {
-			optimizer_step(stream, loss_scale);
-		}
+      if (run_optimizer) {
+        optimizer_step(stream, loss_scale);
+      }
+    }
 
 		return ctx;
 	}
