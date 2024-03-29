@@ -28,6 +28,10 @@ inline void registerKernel(cudaStream_t stream, std::vector<tcnn::GPUMatrixBase 
 }
 
 inline void printResult() {
+  if (kernelDataDependencies.size() == 0) {
+    return;
+  }
+
   size_t totalArraySize = 0;
   for (const auto &[_, size] : matrixAddressToSize) {
     totalArraySize += size;
