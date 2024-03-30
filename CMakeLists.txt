@@ -235,7 +235,8 @@ if (NOT MSVC)
 endif()
 
 set(BUILD_SHARED_LIBS OFF)
-add_subdirectory("dependencies/fmt")
+
+find_package(fmt REQUIRED)
 
 ###############################################################################
 # tiny-cuda-nn library, samples, and benchmarks
@@ -274,9 +275,8 @@ target_include_directories(tiny-cuda-nn PUBLIC
 	"dependencies"
 	"dependencies/cutlass/include"
 	"dependencies/cutlass/tools/util/include"
-	"dependencies/fmt/include"
 )
-target_link_libraries(tiny-cuda-nn PUBLIC ${CUDA_LIBRARIES} ${TCNN_LIBRARIES} fmt)
+target_link_libraries(tiny-cuda-nn PUBLIC ${CUDA_LIBRARIES} ${TCNN_LIBRARIES} fmt::fmt)
 
 if (TCNN_BUILD_EXAMPLES)
 	add_subdirectory("samples")
