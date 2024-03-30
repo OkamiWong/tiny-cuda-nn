@@ -1,10 +1,14 @@
 .PHONY: config
 config:
-	cmake -S . -B ./build -DCMAKE_BUILD_TYPE=RelWithDebInfo
+	cmake -S . -B ./build -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+	-DCMAKE_TOOLCHAIN_FILE=${VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake \
+	-DCMAKE_PREFIX_PATH=${ORTOOLS_ROOT}
 
 .PHONY: config-debug
 config-debug:
-	cmake -S . -B ./build -DCMAKE_BUILD_TYPE=Debug
+	cmake -S . -B ./build -DCMAKE_BUILD_TYPE=Debug \
+	-DCMAKE_TOOLCHAIN_FILE=${VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake \
+	-DCMAKE_PREFIX_PATH=${ORTOOLS_ROOT}
 
 .PHONY: build
 build:
