@@ -238,6 +238,8 @@ set(BUILD_SHARED_LIBS OFF)
 
 find_package(fmt REQUIRED)
 
+add_subdirectory("dependencies/optimize-cuda-memory-usage-v1")
+
 ###############################################################################
 # tiny-cuda-nn library, samples, and benchmarks
 ###############################################################################

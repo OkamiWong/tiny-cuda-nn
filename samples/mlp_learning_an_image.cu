@@ -36,6 +36,8 @@
 
 #include <memory-optimizer/preflight.h>
 
+#include <memopt.hpp>
+
 #include <chrono>
 #include <cstdlib>
 #include <fstream>
@@ -101,6 +103,8 @@ __global__ void eval_image(uint32_t n_elements, cudaTextureObject_t texture, flo
 }
 
 int main(int argc, char* argv[]) {
+	memopt::ConfigurationManager::exportDefaultConfiguration();
+
 	try {
 		uint32_t compute_capability = cuda_compute_capability();
 		if (compute_capability < MIN_GPU_ARCH) {
