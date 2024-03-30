@@ -29,3 +29,7 @@ run:
 .PHONY: run-steps
 run-steps:
 	./build/mlp_learning_an_image data/images/albert.jpg data/config_mem.json $(STEPS) inference.jpg
+
+.PHONY: update-memopt
+update-memopt:
+	git submodule update --remote dependencies/optimize-cuda-memory-usage-v1/
