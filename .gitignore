@@ -7,4 +7,12 @@ dist
 /.cache
 /.vscode
 /*.jpg
+
+# Config
+config.json
+currentConfig.json
+defaultConfig.json
+
+# Debug
 *.dot
+*.out
