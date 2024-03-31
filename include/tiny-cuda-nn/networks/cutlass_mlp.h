@@ -55,7 +55,10 @@ public:
 
 	std::unique_ptr<Context> forward_impl(cudaStream_t stream, const GPUMatrixDynamic<T>& input, GPUMatrixDynamic<T>* output = nullptr, bool use_inference_params = false, bool prepare_input_gradients = false) override;
 
-	void backward_impl(
+	std::unique_ptr<Context> forward_alloc(cudaStream_t stream, const GPUMatrixDynamic<T>& input, GPUMatrixDynamic<T>* output = nullptr, bool use_inference_params = false, bool prepare_input_gradients = false) override;
+  void forward_impl(cudaStream_t stream, Context& ctx, const GPUMatrixDynamic<T>& input, GPUMatrixDynamic<T>* output = nullptr, bool use_inference_params = false, bool prepare_input_gradients = false) override;
+
+  void backward_impl(
 		cudaStream_t stream,
 		const Context& ctx,
 		const GPUMatrixDynamic<T>& input,

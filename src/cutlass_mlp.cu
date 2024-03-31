@@ -227,6 +227,71 @@ std::unique_ptr<Context> CutlassMLP<T>::forward_impl(cudaStream_t stream, const 
 }
 
 template <typename T>
+std::unique_ptr<Context> CutlassMLP<T>::forward_alloc(cudaStream_t stream, const GPUMatrixDynamic<T> &input, GPUMatrixDynamic<T> *output, bool use_inference_params, bool prepare_input_gradients) {
+  // If there are no hidden layers, the network is just a simple matmul. No tmp buffers required
+  if (m_n_hidden_layers == 0) {
+    return std::make_unique<ForwardContext>();  // Nothing to save -- empty context
+  }
+
+  // Make sure our temporary buffers have the correct size for the given batch size
+  uint32_t batch_size = input.n();
+  auto forward = allocate_forward_buffers(stream, batch_size);
+
+  return forward;
+}
+
+template <typename T>
+void CutlassMLP<T>::forward_impl(cudaStream_t stream, Context &ctx, const GPUMatrixDynamic<T> &input, GPUMatrixDynamic<T> *output, bool use_inference_params, bool prepare_input_gradients) {
+	auto& forward = dynamic_cast<ForwardContext&>(ctx);
+
+  // If there are no hidden layers, the network is just a simple matmul. No tmp buffers required
+  if (m_n_hidden_layers == 0) {
+    if (output) {
+      compute_layer<LastLayer>(stream, false, m_output_activation, input_weight_matrix(use_inference_params), input, *output, *output);
+    }
+    return;
+  }
+
+  // Make sure our temporary buffers have the correct size for the given batch size
+  uint32_t batch_size = input.n();
+
+  // Run the actual network
+  uint32_t tmp_idx = 0;
+
+  preflight::registerKernel(stream, {(GPUMatrixBase *)&input_weight_matrix(use_inference_params), (GPUMatrixBase *)&input, (GPUMatrixBase *)&(forward.hidden.at(tmp_idx)), (GPUMatrixBase *)&(m_can_fuse_activation ? forward.hidden.at(tmp_idx) : forward.hidden.at(tmp_idx + 1))});
+  bool fused = compute_layer<FullLayer>(
+    stream,
+    false,
+    m_activation,
+    input_weight_matrix(use_inference_params),
+    input,
+    forward.hidden.at(tmp_idx),
+    m_can_fuse_activation ? forward.hidden.at(tmp_idx) : forward.hidden.at(tmp_idx + 1)
+  );
+  tmp_idx += fused ? 1 : 2;
+
+  // layers
+  for (uint32_t i = 0; i < m_n_hidden_matmuls; ++i) {
+    preflight::registerKernel(stream, {(GPUMatrixBase *)&weight_matrix_at(use_inference_params, i), (GPUMatrixBase *)&(forward.hidden.at(tmp_idx - 1)), (GPUMatrixBase *)&(forward.hidden.at(tmp_idx)), (GPUMatrixBase *)&(m_can_fuse_activation ? forward.hidden.at(tmp_idx) : forward.hidden.at(tmp_idx + 1))});
+    fused = compute_layer<FullLayer>(
+      stream,
+      false,
+      m_activation,
+      weight_matrix_at(use_inference_params, i),
+      forward.hidden.at(tmp_idx - 1),
+      forward.hidden.at(tmp_idx),
+      m_can_fuse_activation ? forward.hidden.at(tmp_idx) : forward.hidden.at(tmp_idx + 1)
+    );
+    tmp_idx += fused ? 1 : 2;
+  }
+
+  if (output) {
+    preflight::registerKernel(stream, {(GPUMatrixBase *)&output_weight_matrix(use_inference_params), (GPUMatrixBase *)&(forward.hidden.at(tmp_idx - 1)), (GPUMatrixBase *)output});
+    compute_layer<LastLayer>(stream, false, m_output_activation, output_weight_matrix(use_inference_params), forward.hidden.at(tmp_idx - 1), *output, *output);
+  }
+}
+
+template <typename T>
 void CutlassMLP<T>::backward_impl(
 	cudaStream_t stream,
 	const Context& ctx,

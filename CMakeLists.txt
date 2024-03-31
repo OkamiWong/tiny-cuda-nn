@@ -225,6 +225,8 @@ endif()
 list(APPEND CUDA_NVCC_FLAGS "--extended-lambda")
 list(APPEND CUDA_NVCC_FLAGS "--expt-relaxed-constexpr")
 
+# Suppress overloaded virtual function warning
+list(APPEND CUDA_NVCC_FLAGS "-diag-suppress=611")
 
 ###############################################################################
 # Dependencies

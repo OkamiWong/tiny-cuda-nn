@@ -170,6 +170,14 @@ public:
 		m_synchronize_when_capture_done = true;
 	}
 
+	bool captured() {
+		return m_graph != nullptr;
+	}
+
+	void execute_previous_graph(cudaStream_t stream) {
+    CUDA_CHECK_THROW(cudaGraphLaunch(m_graph_instance, stream));
+  }
+
 private:
 	cudaGraph_t m_graph = nullptr;
 	cudaGraphExec_t m_graph_instance = nullptr;

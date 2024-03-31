@@ -80,7 +80,27 @@ public:
 		return forward;
 	}
 
-	void backward_impl(
+  std::unique_ptr<Context> forward_alloc(cudaStream_t stream, const GPUMatrixDynamic<float>& input, GPUMatrixDynamic<T>* output = nullptr, bool use_inference_params = false, bool prepare_input_gradients = false) override {
+    // Make sure our temporary buffers have the correct size for the given batch size
+    uint32_t batch_size = input.n();
+
+    auto forward = std::make_unique<ForwardContext>();
+
+    forward->network_input = GPUMatrixDynamic<T>{m_encoding->padded_output_width(), input.n(), stream, m_encoding->preferred_output_layout()};
+    forward->encoding_ctx = m_encoding->forward_alloc(stream, input, &forward->network_input, use_inference_params, prepare_input_gradients);
+    forward->network_ctx = m_network->forward_alloc(stream, forward->network_input, output, use_inference_params, true);
+
+    return forward;
+  }
+
+  void forward_impl(cudaStream_t stream, Context& ctx, const GPUMatrixDynamic<float>& input, GPUMatrixDynamic<T>* output = nullptr, bool use_inference_params = false, bool prepare_input_gradients = false) override {
+    auto& forward = dynamic_cast<ForwardContext&>(ctx);
+
+    m_encoding->forward(stream, *forward.encoding_ctx, input, &forward.network_input, use_inference_params, prepare_input_gradients);
+    m_network->forward(stream, *forward.network_ctx, forward.network_input, output, use_inference_params, true);
+  }
+
+  void backward_impl(
 		cudaStream_t stream,
 		const Context& ctx,
 		const GPUMatrixDynamic<float>& input,

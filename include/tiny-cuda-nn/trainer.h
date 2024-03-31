@@ -94,7 +94,7 @@ public:
 		std::unique_ptr<Context> model_ctx;
 	};
 
-	std::unique_ptr<ForwardContext> forward(
+	std::shared_ptr<ForwardContext> forward_alloc(
 		cudaStream_t stream,
 		const float loss_scale,
 		const GPUMatrixDynamic<T>& input,
@@ -104,63 +104,73 @@ public:
 		bool prepare_input_gradients = false,
 		const GPUMatrix<COMPUTE_T>* external_dL_dy = nullptr
 	) {
-		const uint32_t batch_size = input.n();
+    const uint32_t batch_size = input.n();
 
-		auto forward = std::make_unique<ForwardContext>();
+    auto forward = std::make_shared<ForwardContext>();
 
-		forward->output = GPUMatrix<COMPUTE_T>{m_model->padded_output_width(), batch_size, stream};
-		forward->model_ctx = m_model->forward(stream, input, &forward->output, use_inference_params, prepare_input_gradients);
+    forward->output = GPUMatrix<COMPUTE_T>{m_model->padded_output_width(), batch_size, stream};
+    forward->model_ctx = m_model->forward_alloc(stream, input, &forward->output, use_inference_params, prepare_input_gradients);
+
+    if (m_perturbation_sigma > 0) {
+      forward->perturbed_output = GPUMatrix<COMPUTE_T>{m_model->padded_output_width(), batch_size, stream};
+    }
+
+    forward->L = GPUMatrix<float>{m_model->padded_output_width(), batch_size, stream};
+
+    if (external_dL_dy) {
+      CHECK_THROW(external_dL_dy->m() == m_model->padded_output_width());
+      CHECK_THROW(external_dL_dy->n() == batch_size);
+
+      forward->dL_doutput = GPUMatrix<COMPUTE_T>{external_dL_dy->data(), m_model->padded_output_width(), batch_size};
+    } else {
+      CHECK_THROW(input.n() == target.n());
+      CHECK_THROW(m_model->output_width() == target.m());
+
+      forward->dL_doutput = GPUMatrix<COMPUTE_T>{m_model->padded_output_width(), batch_size, stream};
+    }
+
+    return forward;
+  }
+
+	void forward(
+		cudaStream_t stream,
+		ForwardContext& forward,
+		const float loss_scale,
+		const GPUMatrixDynamic<T>& input,
+		const GPUMatrix<float>& target,
+		const GPUMatrix<float>* data_pdf = nullptr,
+		bool use_inference_params = false,
+		bool prepare_input_gradients = false,
+		const GPUMatrix<COMPUTE_T>* external_dL_dy = nullptr
+	) {
+    const uint32_t batch_size = input.n();
+
+    m_model->forward(stream, *forward.model_ctx, input, &forward.output, use_inference_params, prepare_input_gradients);
 
 		if (m_perturbation_sigma > 0) {
 			GPUMatrix<float> perturbation{m_model->padded_output_width(), batch_size, stream};
-			forward->perturbed_output = GPUMatrix<COMPUTE_T>{m_model->padded_output_width(), batch_size, stream};
 
 			const uint32_t n_elements = perturbation.n_elements();
 			generate_random_logistic<float>(stream, m_rng, n_elements, perturbation.data(), 0.0f, m_perturbation_sigma);
-			add<<<n_blocks_linear(n_elements), N_THREADS_LINEAR, 0, stream>>>(n_elements, forward->output.data(), perturbation.data(), forward->perturbed_output.data());
+			add<<<n_blocks_linear(n_elements), N_THREADS_LINEAR, 0, stream>>>(n_elements, forward.output.data(), perturbation.data(), forward.perturbed_output.data());
 		}
 
-		auto& loss_input = m_perturbation_sigma > 0 ? forward->perturbed_output : forward->output;
+		auto& loss_input = m_perturbation_sigma > 0 ? forward.perturbed_output : forward.output;
 
-		forward->L = GPUMatrix<float>{m_model->padded_output_width(), batch_size, stream};
-
-		if (external_dL_dy) {
-			CHECK_THROW(external_dL_dy->m() == m_model->padded_output_width());
-			CHECK_THROW(external_dL_dy->n() == batch_size);
-
-			forward->dL_doutput = GPUMatrix<COMPUTE_T>{external_dL_dy->data(), m_model->padded_output_width(), batch_size};
-		} else {
-			CHECK_THROW(input.n() == target.n());
-			CHECK_THROW(m_model->output_width() == target.m());
-
-			forward->dL_doutput = GPUMatrix<COMPUTE_T>{m_model->padded_output_width(), batch_size, stream};
-			m_loss->evaluate(stream, loss_scale, loss_input, target, forward->L, forward->dL_doutput, data_pdf);
+		if (!external_dL_dy) {
+			m_loss->evaluate(stream, loss_scale, loss_input, target, forward.L, forward.dL_doutput, data_pdf);
 		}
-
-		return forward;
-	}
-
-	std::unique_ptr<ForwardContext> forward(const float loss_scale, const GPUMatrixDynamic<T>& input, const GPUMatrix<float>& target, const GPUMatrix<float>* data_pdf = nullptr, bool use_inference_params = false, bool prepare_input_gradients = false, const GPUMatrix<COMPUTE_T>* external_dL_dy = nullptr) {
-		return forward(nullptr, loss_scale, input, target, data_pdf, use_inference_params, prepare_input_gradients, external_dL_dy);
 	}
 
 	void backward(cudaStream_t stream, const ForwardContext& ctx, const GPUMatrixDynamic<T>& input, GPUMatrixDynamic<T>* dL_dinput = nullptr, bool use_inference_params = false, GradientMode param_gradients_mode = GradientMode::Overwrite) {
 		m_model->backward(stream, *ctx.model_ctx, input, ctx.output, ctx.dL_doutput, dL_dinput, use_inference_params, param_gradients_mode);
 	}
 
-	void backward(const ForwardContext& ctx, const GPUMatrixDynamic<T>& input, GPUMatrixDynamic<T>* dL_dinput = nullptr, bool use_inference_params = false, GradientMode param_gradients_mode = GradientMode::Overwrite) {
-		backward(nullptr, ctx, input, dL_dinput, use_inference_params, param_gradients_mode);
-	}
-
 	void optimizer_step(cudaStream_t stream, float loss_scale) {
 		m_optimizer->step(stream, loss_scale, m_params_full_precision, m_params, m_param_gradients);
 	}
 
-	void optimizer_step(float loss_scale) {
-		optimizer_step(nullptr, loss_scale);
-	}
-
-	std::unique_ptr<ForwardContext> training_step(
+	std::shared_ptr<ForwardContext> training_step(
 		cudaStream_t stream,
 		const GPUMatrixDynamic<T>& input,
 		const GPUMatrix<float>& target,
@@ -173,20 +183,22 @@ public:
 	) {
 		const float loss_scale = default_loss_scale<PARAMS_T>();
 
-		// Execute forward and backward in a CUDA graph for maximum performance.
-		std::unique_ptr<ForwardContext> ctx;
-		{
-			// Execute forward and backward in a CUDA graph for maximum performance.
-			auto capture_guard = m_graph.capture_guard(stream);
-			ctx = forward(stream, loss_scale, input, target, data_pdf, use_inference_params, dL_dinput, external_dL_dy);
-			backward(stream, *ctx, input, dL_dinput, use_inference_params, param_gradients_mode);
+		if (m_training_ctx.get() == nullptr){
+      m_training_ctx = forward_alloc(stream, loss_scale, input, target, data_pdf, use_inference_params, dL_dinput, external_dL_dy);
+    }
 
+		if (!m_graph.captured()){
+      auto capture_guard = m_graph.capture_guard(stream);
+      forward(stream, *m_training_ctx, loss_scale, input, target, data_pdf, use_inference_params, dL_dinput, external_dL_dy);
+      backward(stream, *m_training_ctx, input, dL_dinput, use_inference_params, param_gradients_mode);
       if (run_optimizer) {
         optimizer_step(stream, loss_scale);
       }
-    }
+    } else {
+			m_graph.execute_previous_graph(stream);
+		}
 
-		return ctx;
+		return m_training_ctx;
 	}
 
 	std::unique_ptr<ForwardContext> training_step(
@@ -355,7 +367,7 @@ private:
 
 	float m_perturbation_sigma;
 
-	std::unique_ptr<Context> m_training_ctx;
+  std::shared_ptr<ForwardContext> m_training_ctx;
 
 	pcg32 m_rng;
 };

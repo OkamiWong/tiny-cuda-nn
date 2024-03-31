@@ -178,7 +178,8 @@ public:
 		inference(nullptr, input, output, use_inference_params);
 	}
 
-	virtual std::unique_ptr<Context> forward_impl(
+	// Mode 1: Context is created during the forward propagation
+  virtual std::unique_ptr<Context> forward_impl(
 		cudaStream_t stream,
 		const GPUMatrixDynamic<T>& input,
 		GPUMatrixDynamic<COMPUTE_T>* output = nullptr,
@@ -216,7 +217,47 @@ public:
 		return forward(nullptr, input, output, use_inference_params, prepare_input_gradients);
 	}
 
-	virtual void backward_impl(
+  // Mode 2: Context is created before the forward propagation
+  virtual std::unique_ptr<Context> forward_alloc(
+    cudaStream_t stream,
+    const GPUMatrixDynamic<T>& input,
+    GPUMatrixDynamic<COMPUTE_T>* output = nullptr,
+    bool use_inference_params = false,
+    bool prepare_input_gradients = false
+  ) { return std::make_unique<Context>(); }
+  virtual void forward_impl(
+    cudaStream_t stream,
+    Context& ctx,
+    const GPUMatrixDynamic<T>& input,
+    GPUMatrixDynamic<COMPUTE_T>* output = nullptr,
+    bool use_inference_params = false,
+    bool prepare_input_gradients = false
+  ) {}
+  void forward(
+    cudaStream_t stream,
+    Context& ctx,
+    const GPUMatrixDynamic<T>& input,
+    GPUMatrixDynamic<COMPUTE_T>* output = nullptr,
+    bool use_inference_params = false,
+    bool prepare_input_gradients = false
+  ) {
+    CHECK_THROW(input.m() == input_width());
+    CHECK_THROW(!output || output->m() == padded_output_width());
+    CHECK_THROW(input.n() % BATCH_SIZE_GRANULARITY == 0);
+    CHECK_THROW(!output || input.n() == output->n());
+
+    if (this->n_params() > 0) {
+      if (use_inference_params) {
+        CHECK_THROW(this->inference_params() != nullptr);
+      } else {
+        CHECK_THROW(this->params() != nullptr);
+      }
+    }
+
+    return forward_impl(stream, ctx, input, output, use_inference_params, prepare_input_gradients);
+  }
+
+  virtual void backward_impl(
 		cudaStream_t stream,
 		const Context& ctx,
 		const GPUMatrixDynamic<T>& input,
