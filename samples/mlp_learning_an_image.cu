@@ -34,7 +34,7 @@
 
 #include <stbi/stbi_wrapper.h>
 
-#include <memory-optimizer/preflight.h>
+#include <memopt-adapter/preflight.h>
 
 #include <memopt.hpp>
 

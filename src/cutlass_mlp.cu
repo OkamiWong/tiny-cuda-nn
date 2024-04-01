@@ -33,7 +33,7 @@
 #include <tiny-cuda-nn/cutlass_matmul.h>
 #include <tiny-cuda-nn/multi_stream.h>
 
-#include <memory-optimizer/preflight.h>
+#include <memopt-adapter/preflight.h>
 
 namespace tcnn {
 

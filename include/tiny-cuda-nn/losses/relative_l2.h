@@ -34,7 +34,7 @@
 #include <tiny-cuda-nn/common_device.h>
 #include <tiny-cuda-nn/loss.h>
 
-#include <memory-optimizer/preflight.h>
+#include <memopt-adapter/preflight.h>
 
 namespace tcnn {
 

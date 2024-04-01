@@ -38,7 +38,7 @@
 #include <tiny-cuda-nn/multi_stream.h>
 #include <tiny-cuda-nn/random.h>
 
-#include <memory-optimizer/preflight.h>
+#include <memopt-adapter/preflight.h>
 
 #include <stdexcept>
 #include <stdint.h>
