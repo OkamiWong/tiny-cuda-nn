@@ -38,6 +38,7 @@
 #include <tiny-cuda-nn/multi_stream.h>
 #include <tiny-cuda-nn/random.h>
 
+#include <memopt-adapter/adapter.h>
 #include <memopt-adapter/preflight.h>
 
 #include <stdexcept>
@@ -829,6 +830,7 @@ public:
 
     if (prepare_input_gradients) {
       forward->dy_dx = GPUMatrix<float, RM>{N_POS_DIMS * m_n_features, input.n(), stream};
+			memopt_adapter::register_array(forward->dy_dx);
     }
 
     return forward;

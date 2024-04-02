@@ -33,6 +33,7 @@
 #include <tiny-cuda-nn/cutlass_matmul.h>
 #include <tiny-cuda-nn/multi_stream.h>
 
+#include <memopt-adapter/adapter.h>
 #include <memopt-adapter/preflight.h>
 
 namespace tcnn {
@@ -305,6 +306,8 @@ void CutlassMLP<T>::backward_impl(
 	// Make sure our temporary buffers have the correct size for the given batch size
 	uint32_t batch_size = dL_doutput.n();
 
+	// These matrices takes up almost half of the total memory footprint
+	// However, they are not managed by memopt for their life cycle is already close to optimal
 	std::vector<GPUMatrix<T>> backward_tmp(num_forward_activations());
 	for (uint32_t i = 0; i < num_forward_activations(); ++i) {
 		backward_tmp[i] = GPUMatrix<T>{m_network_width, batch_size, stream};
@@ -436,6 +439,7 @@ std::unique_ptr<typename CutlassMLP<T>::ForwardContext> CutlassMLP<T>::allocate_
 	forward->hidden.resize(num_forward_activations());
 	for (uint32_t i = 0; i < num_forward_activations(); ++i) {
 		forward->hidden[i] = GPUMatrix<T>{m_network_width, batch_size, stream};
+		memopt_adapter::register_array(forward->hidden[i]);
 	}
 
 	return forward;

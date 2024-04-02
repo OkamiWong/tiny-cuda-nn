@@ -40,6 +40,8 @@
 #include <tiny-cuda-nn/random.h>
 #include <tiny-cuda-nn/reduce_sum.h>
 
+#include <memopt-adapter/adapter.h>
+
 #include <random>
 
 namespace tcnn {
@@ -75,6 +77,8 @@ public:
 		m_params_buffer.resize(sizeof(PARAMS_T) * n_params * 2 + sizeof(float) * n_params * 1);
 		m_params_buffer.memset(0);
 
+		printf("trainer.m_params_buffer (MiB): %.6lf\n", (double)m_params_buffer.get_bytes() / 1024.0 / 1024.0);
+
 		reset_param_pointers();
 
 		m_model->initialize_params(m_rng, m_params_full_precision);
@@ -109,24 +113,30 @@ public:
     auto forward = std::make_shared<ForwardContext>();
 
     forward->output = GPUMatrix<COMPUTE_T>{m_model->padded_output_width(), batch_size, stream};
+		memopt_adapter::register_array(forward->output);
+
     forward->model_ctx = m_model->forward_alloc(stream, input, &forward->output, use_inference_params, prepare_input_gradients);
 
     if (m_perturbation_sigma > 0) {
       forward->perturbed_output = GPUMatrix<COMPUTE_T>{m_model->padded_output_width(), batch_size, stream};
+			memopt_adapter::register_array(forward->perturbed_output);
     }
 
     forward->L = GPUMatrix<float>{m_model->padded_output_width(), batch_size, stream};
+		memopt_adapter::register_array(forward->L);
 
     if (external_dL_dy) {
       CHECK_THROW(external_dL_dy->m() == m_model->padded_output_width());
       CHECK_THROW(external_dL_dy->n() == batch_size);
 
       forward->dL_doutput = GPUMatrix<COMPUTE_T>{external_dL_dy->data(), m_model->padded_output_width(), batch_size};
+			memopt_adapter::register_array(forward->dL_doutput);
     } else {
       CHECK_THROW(input.n() == target.n());
       CHECK_THROW(m_model->output_width() == target.m());
 
       forward->dL_doutput = GPUMatrix<COMPUTE_T>{m_model->padded_output_width(), batch_size, stream};
+			memopt_adapter::register_array(forward->dL_doutput);
     }
 
     return forward;

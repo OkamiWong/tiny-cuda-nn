@@ -34,6 +34,7 @@
 
 #include <stbi/stbi_wrapper.h>
 
+#include <memopt-adapter/adapter.h>
 #include <memopt-adapter/preflight.h>
 
 #include <memopt.hpp>
@@ -104,6 +105,12 @@ __global__ void eval_image(uint32_t n_elements, cudaTextureObject_t texture, flo
 
 int main(int argc, char* argv[]) {
 	memopt::ConfigurationManager::exportDefaultConfiguration();
+	memopt::ConfigurationManager::initialize(0, nullptr);
+
+	set_cuda_device(memopt::Constants::DEVICE_ID);
+
+	memopt::PeakMemoryUsageProfiler peak_memory_usage_profiler(100);
+	peak_memory_usage_profiler.start();
 
 	uint32_t compute_capability = cuda_compute_capability();
 	if (compute_capability < MIN_GPU_ARCH) {
@@ -304,18 +311,18 @@ int main(int argc, char* argv[]) {
 		}
 	}
 
-	// Dump final image if a name was specified
-	if (argc >= 5) {
-		network->inference(inference_stream, inference_batch, prediction);
-		save_image(prediction.data(), sampling_width, sampling_height, 3, n_output_dims, argv[4]);
-	}
+  preflight::printResult();
+  printf("total_registered_array_bytes (MiB): %.6lf\n", (double)memopt_adapter::total_registered_array_bytes() / 1024.0 / 1024.0);
+  printf("peak_memory_usage (MiB): %.6lf\n", (double)peak_memory_usage_profiler.end() / 1024.0 / 1024.0);
+
+  // Dump final image if a name was specified
+	// Temporarily disabled for we only care about training stage
+	// if (argc >= 5) {
+	// 	network->inference(inference_stream, inference_batch, prediction);
+	// 	save_image(prediction.data(), sampling_width, sampling_height, 3, n_output_dims, argv[4]);
+	// }
 
 	free_all_gpu_memory_arenas();
-
-	// If only the memory arenas pertaining to a single stream are to be freed, use
-	//free_gpu_memory_arena(stream);
-
-	preflight::printResult();
 
 	return EXIT_SUCCESS;
 }
