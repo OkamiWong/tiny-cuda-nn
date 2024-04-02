@@ -280,7 +280,7 @@ target_include_directories(tiny-cuda-nn PUBLIC
 	"dependencies/cutlass/include"
 	"dependencies/cutlass/tools/util/include"
 )
-target_link_libraries(tiny-cuda-nn PUBLIC ${CUDA_LIBRARIES} ${TCNN_LIBRARIES} fmt::fmt)
+target_link_libraries(tiny-cuda-nn PUBLIC ${CUDA_LIBRARIES} ${TCNN_LIBRARIES} fmt::fmt memopt)
 
 if (TCNN_BUILD_EXAMPLES)
 	add_subdirectory("samples")
