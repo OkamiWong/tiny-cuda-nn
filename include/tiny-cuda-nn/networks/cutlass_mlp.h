@@ -161,6 +161,7 @@ public:
 private:
 	struct ForwardContext : public Context {
 		std::vector<GPUMatrix<T>> hidden;
+		std::vector<GPUMatrix<T>> backward_tmp;
 	};
 
 	std::unique_ptr<ForwardContext> allocate_forward_buffers(cudaStream_t stream, uint32_t batch_size);

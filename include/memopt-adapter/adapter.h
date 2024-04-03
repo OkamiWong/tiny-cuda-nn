@@ -4,6 +4,8 @@
 
 #include <memopt.hpp>
 
+#include <functional>
+
 namespace memopt_adapter {
 
 template <typename T>
@@ -23,6 +25,21 @@ inline size_t total_registered_array_bytes() {
     bytes += size;
   }
   return bytes;
+}
+
+typedef std::function<void(std::map<void *, void *>, cudaStream_t)> Task;
+
+inline std::vector<Task> tasks;
+
+inline void register_and_execute_task(
+  std::vector<void *> inputs,
+  std::vector<void *> outputs,
+  Task task,
+  cudaStream_t stream
+) {
+  auto taskId = tasks.size();
+  memopt::annotateNextTask(taskId, inputs, outputs, stream);
+  task({}, stream);
 }
 
 }  // namespace memopt_adapter

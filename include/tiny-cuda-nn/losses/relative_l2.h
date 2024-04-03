@@ -34,7 +34,7 @@
 #include <tiny-cuda-nn/common_device.h>
 #include <tiny-cuda-nn/loss.h>
 
-#include <memopt-adapter/preflight.h>
+#include <memopt-adapter/adapter.h>
 
 namespace tcnn {
 
@@ -97,23 +97,30 @@ public:
 		CHECK_THROW(gradients.m() == stride);
 		CHECK_THROW(!data_pdf || data_pdf->m() == dims);
 
-		preflight::registerKernel(stream, {
-			(GPUMatrixBase *)&prediction,
-			(GPUMatrixBase *)&target,
-			(GPUMatrixBase *)&values,
-			(GPUMatrixBase *)&gradients,
-			(GPUMatrixBase *)data_pdf
-		});
-		linear_kernel(relative_l2_loss<T>, 0, stream,
-			prediction.n_elements(),
-			stride,
-			dims,
+		memopt_adapter::Task task = [
+			&,
 			loss_scale,
-			prediction.data(),
-			target.data(),
-			values.data(),
-			gradients.data(),
-			data_pdf ? data_pdf->data() : nullptr
+			data_pdf,
+			dims,
+			stride
+		](std::map<void*, void*> addressUpdate, cudaStream_t stream) {
+			linear_kernel(relative_l2_loss<T>, 0, stream,
+				prediction.n_elements(),
+				stride,
+				dims,
+				loss_scale,
+				prediction.data(),
+				target.data(),
+				values.data(),
+				gradients.data(),
+				data_pdf ? data_pdf->data() : nullptr
+			);
+		};
+		memopt_adapter::register_and_execute_task(
+			{prediction.data()},
+			{values.data(), gradients.data()},
+			task,
+			stream
 		);
 	}
 

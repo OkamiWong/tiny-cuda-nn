@@ -39,7 +39,6 @@
 #include <tiny-cuda-nn/random.h>
 
 #include <memopt-adapter/adapter.h>
-#include <memopt-adapter/preflight.h>
 
 #include <stdexcept>
 #include <stdint.h>
@@ -779,11 +778,6 @@ public:
 			forward->dy_dx = GPUMatrix<float, RM>{N_POS_DIMS * m_n_features, input.n(), synced_streams.get(0)};
 		}
 
-		preflight::registerKernel(stream, {
-			(GPUMatrixBase *)output,
-			&(forward->positions),
-			(GPUMatrixBase *)&(forward->dy_dx)
-		});
 		kernel_grid<T, N_POS_DIMS, N_FEATURES_PER_LEVEL, HASH_TYPE><<<blocks_hashgrid, N_THREADS_HASHGRID, 0, synced_streams.get(0)>>>(
 			num_elements,
 			m_n_features,
@@ -855,6 +849,9 @@ public:
 
     // Take care of padding on the auxiliary stream
     if (output && m_n_to_pad > 0) {
+      // Currently not supported
+      assert(false);
+
       if (output->layout() == AoS) {
         parallel_for_gpu_aos(synced_streams.get(1), num_elements, m_n_to_pad, [n_output_dims = m_n_output_dims, out = output->pitched_ptr()] __device__(size_t elem, size_t dim) {
           out(elem)[n_output_dims + dim] = 0;
@@ -873,40 +870,53 @@ public:
     static constexpr uint32_t N_THREADS_HASHGRID = 512;
     const dim3 blocks_hashgrid = {div_round_up(num_elements, N_THREADS_HASHGRID), m_n_levels, 1};
 
-    T* encoded_positions_soa = output ? output->data() : nullptr;
-    GPUMemoryArena::Allocation workspace;
-    if (output && output->layout() == AoS) {
-      workspace = allocate_workspace(synced_streams.get(0), num_elements * m_n_features * sizeof(T));
-      encoded_positions_soa = (T*)workspace.data();
-    }
+    memopt_adapter::Task task = [
+			&,
+			output,
+			use_inference_params,
+			num_elements,
+			blocks_hashgrid
+		](std::map<void*, void*> addressUpdate, cudaStream_t stream) {
+      T* encoded_positions_soa = output ? output->data() : nullptr;
+      GPUMemoryArena::Allocation workspace;
+      if (output && output->layout() == AoS) {
+        workspace = allocate_workspace(stream, num_elements * m_n_features * sizeof(T));
+        encoded_positions_soa = (T*)workspace.data();
+      }
 
-    preflight::registerKernel(stream, {(GPUMatrixBase*)output, &(forward.positions), (GPUMatrixBase*)&(forward.dy_dx)});
-    kernel_grid<T, N_POS_DIMS, N_FEATURES_PER_LEVEL, HASH_TYPE><<<blocks_hashgrid, N_THREADS_HASHGRID, 0, synced_streams.get(0)>>>(
-      num_elements,
-      m_n_features,
-      m_offset_table,
-      m_base_resolution,
-      std::log2(m_per_level_scale),
-      this->m_max_level,
-      this->m_max_level_gpu,
-      m_interpolation_type,
-      m_grid_type,
-      use_inference_params ? this->inference_params() : this->params(),
-      forward.positions.data() ? forward.positions.view() : input.view(),
-      encoded_positions_soa,
-      forward.dy_dx.data()
-    );
-
-    if (output && output->layout() == AoS) {
-      // Transpose result (was stored row major due to coalescing)
-      const dim3 threads_transpose = {m_n_levels * N_FEATURES_PER_LEVEL, 8, 1};
-      const uint32_t blocks_transpose = div_round_up(num_elements, threads_transpose.y);
-      transpose_encoded_position<T><<<blocks_transpose, threads_transpose, 0, synced_streams.get(0)>>>(
+      kernel_grid<T, N_POS_DIMS, N_FEATURES_PER_LEVEL, HASH_TYPE><<<blocks_hashgrid, N_THREADS_HASHGRID, 0, stream>>>(
         num_elements,
+        m_n_features,
+        m_offset_table,
+        m_base_resolution,
+        std::log2(m_per_level_scale),
+        this->m_max_level,
+        this->m_max_level_gpu,
+        m_interpolation_type,
+        m_grid_type,
+        use_inference_params ? this->inference_params() : this->params(),
+        forward.positions.data() ? forward.positions.view() : input.view(),
         encoded_positions_soa,
-        output->pitched_ptr()
+        forward.dy_dx.data()
       );
-    }
+
+      if (output && output->layout() == AoS) {
+        // Transpose result (was stored row major due to coalescing)
+        const dim3 threads_transpose = {m_n_levels * N_FEATURES_PER_LEVEL, 8, 1};
+        const uint32_t blocks_transpose = div_round_up(num_elements, threads_transpose.y);
+        transpose_encoded_position<T><<<blocks_transpose, threads_transpose, 0, stream>>>(
+          num_elements,
+          encoded_positions_soa,
+          output->pitched_ptr()
+        );
+      }
+    };
+		memopt_adapter::register_and_execute_task(
+			{forward.positions.data()},
+			{forward.dy_dx.data(), output ? output->data() : nullptr},
+			task,
+			stream
+		);
   }
 
   void backward_impl(
@@ -930,7 +940,10 @@ public:
 
 		GPUMemoryArena::Allocation workspace;
 		if (dL_doutput.layout() == CM) {
-			workspace = allocate_workspace(stream, num_elements * m_n_features * sizeof(T));
+      // Currently not supported
+      assert(false);
+
+      workspace = allocate_workspace(stream, num_elements * m_n_features * sizeof(T));
 
 			// Transpose dL_dy. Use the buffer previously occupied by the encoded positions
 			const dim3 threads_transpose = { m_n_levels * N_FEATURES_PER_LEVEL, 8, 1 };
@@ -945,59 +958,72 @@ public:
 		}
 
 		if (param_gradients_mode != GradientMode::Ignore) {
-			// We accumulate gradients with grad_t precision, which, for performance reasons, is not always T.
-			// If not, accumulate in a temporary buffer and cast later.
-			grad_t* grid_gradient;
-			GPUMemoryArena::Allocation grid_gradient_tmp;
-
-			if (!std::is_same<grad_t, T>::value) {
-				grid_gradient_tmp = allocate_workspace(stream, m_n_params * sizeof(grad_t));
-				grid_gradient = (grad_t*)grid_gradient_tmp.data();
-			} else {
-				grid_gradient = (grad_t*)this->gradients();
-			}
-
-			if (param_gradients_mode == GradientMode::Overwrite) {
-				CUDA_CHECK_THROW(cudaMemsetAsync(grid_gradient, 0, n_params() * sizeof(grad_t), stream));
-			}
-
-			static constexpr uint32_t N_THREADS_HASHGRID = 256;
-			static constexpr uint32_t N_FEATURES_PER_THREAD = std::min(2u, N_FEATURES_PER_LEVEL);
-
-			const dim3 blocks_hashgrid = { div_round_up(num_elements * N_FEATURES_PER_LEVEL / N_FEATURES_PER_THREAD, N_THREADS_HASHGRID), m_n_levels, 1 };
-
-			preflight::registerKernel(stream, {
-				(GPUMatrixBase *)&(forward.positions.data() ? forward.positions: input),
-				(GPUMatrixBase *)&dL_doutput
-			});
-			kernel_grid_backward<T, grad_t, N_POS_DIMS, N_FEATURES_PER_LEVEL, N_FEATURES_PER_THREAD, HASH_TYPE><<<blocks_hashgrid, N_THREADS_HASHGRID, 0, stream>>>(
+			memopt_adapter::Task task = [
+				&,
+				dL_dinput,
+				param_gradients_mode,
 				num_elements,
-				m_n_features,
-				m_offset_table,
-				m_base_resolution,
-				std::log2(m_per_level_scale),
-				this->m_max_level,
-				this->m_max_level_gpu,
-				m_stochastic_interpolation,
-				m_interpolation_type,
-				m_grid_type,
-				grid_gradient,
-				forward.positions.data() ? forward.positions.view() : input.view(), // positions SoA
-				dL_dy_rm // gradients SoA
-			);
+				dL_dy_rm
+			](std::map<void*, void*> addressUpdate, cudaStream_t stream) {
+				// We accumulate gradients with grad_t precision, which, for performance reasons, is not always T.
+				// If not, accumulate in a temporary buffer and cast later.
+				grad_t* grid_gradient;
+				GPUMemoryArena::Allocation grid_gradient_tmp;
 
-			if (!std::is_same<grad_t, T>::value) {
-				parallel_for_gpu(stream, n_params(), [grad=this->gradients(), grad_tmp=grid_gradient] __device__ (size_t i) {
-					grad[i] = (T)grad_tmp[i];
-				});
-			}
+				if (!std::is_same<grad_t, T>::value) {
+					grid_gradient_tmp = allocate_workspace(stream, m_n_params * sizeof(grad_t));
+					grid_gradient = (grad_t*)grid_gradient_tmp.data();
+				} else {
+					grid_gradient = (grad_t*)this->gradients();
+				}
+
+				if (param_gradients_mode == GradientMode::Overwrite) {
+					CUDA_CHECK_THROW(cudaMemsetAsync(grid_gradient, 0, n_params() * sizeof(grad_t), stream));
+				}
+
+				static constexpr uint32_t N_THREADS_HASHGRID = 256;
+				static constexpr uint32_t N_FEATURES_PER_THREAD = std::min(2u, N_FEATURES_PER_LEVEL);
+
+				const dim3 blocks_hashgrid = { div_round_up(num_elements * N_FEATURES_PER_LEVEL / N_FEATURES_PER_THREAD, N_THREADS_HASHGRID), m_n_levels, 1 };
+
+				kernel_grid_backward<T, grad_t, N_POS_DIMS, N_FEATURES_PER_LEVEL, N_FEATURES_PER_THREAD, HASH_TYPE><<<blocks_hashgrid, N_THREADS_HASHGRID, 0, stream>>>(
+					num_elements,
+					m_n_features,
+					m_offset_table,
+					m_base_resolution,
+					std::log2(m_per_level_scale),
+					this->m_max_level,
+					this->m_max_level_gpu,
+					m_stochastic_interpolation,
+					m_interpolation_type,
+					m_grid_type,
+					grid_gradient,
+					forward.positions.data() ? forward.positions.view() : input.view(), // positions SoA
+					dL_dy_rm // gradients SoA
+				);
+
+				if (!std::is_same<grad_t, T>::value) {
+					parallel_for_gpu(stream, n_params(), [grad=this->gradients(), grad_tmp=grid_gradient] __device__ (size_t i) {
+						grad[i] = (T)grad_tmp[i];
+					});
+				}
+			};
+			memopt_adapter::register_and_execute_task(
+				{forward.positions.data()},
+				{},
+				task,
+				stream
+			);
 		}
 
 		if (!dL_dinput) {
 			return;
 		}
 
-		linear_kernel(kernel_grid_backward_input<T, N_POS_DIMS>, 0, stream,
+    // Currently not supported
+    assert(false);
+
+    linear_kernel(kernel_grid_backward_input<T, N_POS_DIMS>, 0, stream,
 			num_elements,
 			m_n_features,
 			dL_dy_rm,

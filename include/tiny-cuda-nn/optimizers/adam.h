@@ -42,6 +42,8 @@
 #include <string>
 #include <vector>
 
+#include <memopt-adapter/adapter.h>
+
 namespace tcnn {
 
 template <typename T>
@@ -161,29 +163,37 @@ public:
 
 		uint32_t n_weights_to_optimize = n_weights();
 
-		linear_kernel(adam_step<T>, 0, stream,
-			n_weights_to_optimize,
-			m_n_weights_covered_by_matrices,
-			m_relative_weight_decay,
-			m_absolute_weight_decay,
-			m_weight_clipping_magnitude,
-			loss_scale,
-			m_base_learning_rate,
-			m_non_matrix_learning_rate_factor,
-			m_optimize_matrix_params,
-			m_optimize_non_matrix_params,
-			m_beta1,
-			m_beta2,
-			m_epsilon,
-			lower_lr_bound,
-			upper_lr_bound,
-			m_l2_reg,
-			weights_full_precision,
-			weights,
-			gradients,
-			m_first_moments.data(),
-			m_second_moments.data(),
-			m_param_steps.data()
+		memopt_adapter::Task task = [=](std::map<void*, void*> addressUpdate, cudaStream_t stream) {
+			linear_kernel(adam_step<T>, 0, stream,
+				n_weights_to_optimize,
+				m_n_weights_covered_by_matrices,
+				m_relative_weight_decay,
+				m_absolute_weight_decay,
+				m_weight_clipping_magnitude,
+				loss_scale,
+				m_base_learning_rate,
+				m_non_matrix_learning_rate_factor,
+				m_optimize_matrix_params,
+				m_optimize_non_matrix_params,
+				m_beta1,
+				m_beta2,
+				m_epsilon,
+				lower_lr_bound,
+				upper_lr_bound,
+				m_l2_reg,
+				weights_full_precision,
+				weights,
+				gradients,
+				m_first_moments.data(),
+				m_second_moments.data(),
+				m_param_steps.data()
+			);
+		};
+		memopt_adapter::register_and_execute_task(
+			{},
+			{},
+			task,
+			stream
 		);
 	}
 

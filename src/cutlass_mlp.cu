@@ -34,7 +34,6 @@
 #include <tiny-cuda-nn/multi_stream.h>
 
 #include <memopt-adapter/adapter.h>
-#include <memopt-adapter/preflight.h>
 
 namespace tcnn {
 
@@ -178,12 +177,6 @@ std::unique_ptr<Context> CutlassMLP<T>::forward_impl(cudaStream_t stream, const 
 	// Run the actual network
 	uint32_t tmp_idx = 0;
 
-  preflight::registerKernel(stream, {
-		(GPUMatrixBase *)&input_weight_matrix(use_inference_params),
-		(GPUMatrixBase *)&input,
-		(GPUMatrixBase *)&(forward->hidden.at(tmp_idx)),
-		(GPUMatrixBase *)&(m_can_fuse_activation ? forward->hidden.at(tmp_idx) : forward->hidden.at(tmp_idx + 1))
-	});
   bool fused = compute_layer<FullLayer>(
 		stream,
 		false,
@@ -197,12 +190,6 @@ std::unique_ptr<Context> CutlassMLP<T>::forward_impl(cudaStream_t stream, const 
 
 	// layers
 	for (uint32_t i = 0; i < m_n_hidden_matmuls; ++i) {
-		preflight::registerKernel(stream, {
-			(GPUMatrixBase *)&weight_matrix_at(use_inference_params, i),
-			(GPUMatrixBase *)&(forward->hidden.at(tmp_idx-1)),
-			(GPUMatrixBase *)&(forward->hidden.at(tmp_idx)),
-			(GPUMatrixBase *)&(m_can_fuse_activation ? forward->hidden.at(tmp_idx) : forward->hidden.at(tmp_idx+1))
-		});
 		fused = compute_layer<FullLayer>(
 			stream,
 			false,
@@ -216,11 +203,6 @@ std::unique_ptr<Context> CutlassMLP<T>::forward_impl(cudaStream_t stream, const 
 	}
 
 	if (output) {
-		preflight::registerKernel(stream, {
-			(GPUMatrixBase *)&output_weight_matrix(use_inference_params),
-			(GPUMatrixBase *)&(forward->hidden.at(tmp_idx-1)),
-			(GPUMatrixBase *)output
-		});
 		compute_layer<LastLayer>(stream, false, m_output_activation, output_weight_matrix(use_inference_params), forward->hidden.at(tmp_idx-1), *output, *output);
 	}
 
@@ -238,6 +220,13 @@ std::unique_ptr<Context> CutlassMLP<T>::forward_alloc(cudaStream_t stream, const
   uint32_t batch_size = input.n();
   auto forward = allocate_forward_buffers(stream, batch_size);
 
+  // Originally allocated in backward propagation
+	forward->backward_tmp.resize(num_forward_activations());
+  for (uint32_t i = 0; i < num_forward_activations(); ++i) {
+    forward->backward_tmp[i] = GPUMatrix<T>{m_network_width, batch_size, stream};
+		memopt_adapter::register_array(forward->backward_tmp[i]);
+  }
+
   return forward;
 }
 
@@ -248,47 +237,99 @@ void CutlassMLP<T>::forward_impl(cudaStream_t stream, Context &ctx, const GPUMat
   // If there are no hidden layers, the network is just a simple matmul. No tmp buffers required
   if (m_n_hidden_layers == 0) {
     if (output) {
+      // Currently not supported
+      assert(false);
+
       compute_layer<LastLayer>(stream, false, m_output_activation, input_weight_matrix(use_inference_params), input, *output, *output);
     }
     return;
   }
 
-  // Make sure our temporary buffers have the correct size for the given batch size
-  uint32_t batch_size = input.n();
-
   // Run the actual network
   uint32_t tmp_idx = 0;
 
-  preflight::registerKernel(stream, {(GPUMatrixBase *)&input_weight_matrix(use_inference_params), (GPUMatrixBase *)&input, (GPUMatrixBase *)&(forward.hidden.at(tmp_idx)), (GPUMatrixBase *)&(m_can_fuse_activation ? forward.hidden.at(tmp_idx) : forward.hidden.at(tmp_idx + 1))});
-  bool fused = compute_layer<FullLayer>(
-    stream,
-    false,
-    m_activation,
-    input_weight_matrix(use_inference_params),
-    input,
-    forward.hidden.at(tmp_idx),
-    m_can_fuse_activation ? forward.hidden.at(tmp_idx) : forward.hidden.at(tmp_idx + 1)
-  );
-  tmp_idx += fused ? 1 : 2;
+	memopt_adapter::Task task = [
+		&,
+		use_inference_params,
+		tmp_idx
+	](std::map<void*, void*> addressUpdate, cudaStream_t stream) {
+		bool fused = compute_layer<FullLayer>(
+			stream,
+			false,
+			m_activation,
+			input_weight_matrix(use_inference_params),
+			input,
+			forward.hidden.at(tmp_idx),
+			m_can_fuse_activation ? forward.hidden.at(tmp_idx) : forward.hidden.at(tmp_idx + 1)
+		);
+
+		// Limitation: Only support fusing layer computaion and activation
+		assert(fused);
+	};
+	memopt_adapter::register_and_execute_task(
+		{},
+		{forward.hidden.at(tmp_idx).data()},
+		task,
+		stream
+	);
+
+  // tmp_idx += fused ? 1 : 2;
+	tmp_idx += 1;
 
   // layers
   for (uint32_t i = 0; i < m_n_hidden_matmuls; ++i) {
-    preflight::registerKernel(stream, {(GPUMatrixBase *)&weight_matrix_at(use_inference_params, i), (GPUMatrixBase *)&(forward.hidden.at(tmp_idx - 1)), (GPUMatrixBase *)&(forward.hidden.at(tmp_idx)), (GPUMatrixBase *)&(m_can_fuse_activation ? forward.hidden.at(tmp_idx) : forward.hidden.at(tmp_idx + 1))});
-    fused = compute_layer<FullLayer>(
-      stream,
-      false,
-      m_activation,
-      weight_matrix_at(use_inference_params, i),
-      forward.hidden.at(tmp_idx - 1),
-      forward.hidden.at(tmp_idx),
-      m_can_fuse_activation ? forward.hidden.at(tmp_idx) : forward.hidden.at(tmp_idx + 1)
-    );
-    tmp_idx += fused ? 1 : 2;
+		memopt_adapter::Task task = [
+			&,
+			use_inference_params,
+			tmp_idx,
+			i
+		](std::map<void*, void*> addressUpdate, cudaStream_t stream) {
+			bool fused = compute_layer<FullLayer>(
+				stream,
+				false,
+				m_activation,
+				weight_matrix_at(use_inference_params, i),
+				forward.hidden.at(tmp_idx - 1),
+				forward.hidden.at(tmp_idx),
+				m_can_fuse_activation ? forward.hidden.at(tmp_idx) : forward.hidden.at(tmp_idx + 1)
+			);
+
+			// Limitation: Only support fusing layer computaion and activation
+			assert(fused);
+		};
+		memopt_adapter::register_and_execute_task(
+			{forward.hidden.at(tmp_idx - 1).data()},
+			{forward.hidden.at(tmp_idx).data()},
+			task,
+			stream
+		);
+
+    // tmp_idx += fused ? 1 : 2;
+		tmp_idx += 1;
   }
 
   if (output) {
-    preflight::registerKernel(stream, {(GPUMatrixBase *)&output_weight_matrix(use_inference_params), (GPUMatrixBase *)&(forward.hidden.at(tmp_idx - 1)), (GPUMatrixBase *)output});
-    compute_layer<LastLayer>(stream, false, m_output_activation, output_weight_matrix(use_inference_params), forward.hidden.at(tmp_idx - 1), *output, *output);
+		memopt_adapter::Task task = [
+			&,
+			output,
+			use_inference_params
+		](std::map<void*, void*> addressUpdate, cudaStream_t stream) {
+			compute_layer<LastLayer>(
+				stream,
+				false,
+				m_output_activation,
+				output_weight_matrix(use_inference_params),
+				forward.hidden.at(tmp_idx - 1),
+				*output,
+				*output
+			);
+		};
+		memopt_adapter::register_and_execute_task(
+			{forward.hidden.at(tmp_idx - 1).data()},
+			{output->data()},
+			task,
+			stream
+		);
   }
 }
 
@@ -306,18 +347,11 @@ void CutlassMLP<T>::backward_impl(
 	// Make sure our temporary buffers have the correct size for the given batch size
 	uint32_t batch_size = dL_doutput.n();
 
-	// These matrices takes up almost half of the total memory footprint
-	// However, they are not managed by memopt for their life cycle is already close to optimal
-	std::vector<GPUMatrix<T>> backward_tmp(num_forward_activations());
-	for (uint32_t i = 0; i < num_forward_activations(); ++i) {
-		backward_tmp[i] = GPUMatrix<T>{m_network_width, batch_size, stream};
-	}
-
 	// Compute transfer of output activation in-place... it's treated specially for performance reasons
 	GPUMatrixDynamic<T> backward_output_tmp;
 	if (m_output_activation != Activation::None) {
-		backward_output_tmp = {m_padded_output_width, batch_size, stream, dL_doutput.layout()};
-		activation_backward_output_gpu(stream, dL_doutput.n_elements(), m_output_activation, output.data(), dL_doutput.data(), backward_output_tmp.data());
+		// Currently not supported
+		assert(false);
 	}
 
 	// Backprop
@@ -333,20 +367,14 @@ void CutlassMLP<T>::backward_impl(
 
 	int split_k_factor = batch_size / std::min((uint32_t)(1 << 12), batch_size);
 
+	// Currently output activation is not supported
+	assert(m_output_activation == Activation::None);
 	const GPUMatrixDynamic<T>& tmp_dL_doutput = m_output_activation == Activation::None ? dL_doutput : backward_output_tmp;
 
 	// If there are no hidden layers, the network is just a simple matmul
 	if (m_n_hidden_layers == 0) {
-		if (param_gradients_mode != GradientMode::Ignore) {
-			multi_streams.emplace_back(stream, 2);
-			fc_multiply_split_k<LastLayerK>(multi_streams.back().get(1), tmp_dL_doutput, input.transposed(), input_gradient_matrix(), split_k_factor, param_gradient_beta);
-		}
-
-		if (dL_dinput) {
-			fc_multiply<FullLayer>(stream, input_weight_matrix(use_inference_params).transposed(), tmp_dL_doutput, *dL_dinput);
-		}
-
-		return;
+    // Currently not supported
+    assert(false);
 	}
 
 	uint32_t tmp_idx = (m_can_fuse_activation ? (m_n_hidden_matmuls+1) : ((m_n_hidden_matmuls+1) * 2)) - 1;
@@ -355,25 +383,55 @@ void CutlassMLP<T>::backward_impl(
 	// Output layer
 	if (param_gradients_mode != GradientMode::Ignore) {
 		multi_streams.emplace_back(stream, 2);
-		preflight::registerKernel(stream, {
-			(GPUMatrixBase *)&dL_doutput,
-			(GPUMatrixBase *)&forward.hidden.at(tmp_idx),
-			(GPUMatrixBase *)&output_gradient_matrix()
-		});
-		fc_multiply_split_k<LastLayerK>(multi_streams.back().get(1), tmp_dL_doutput, forward.hidden.at(tmp_idx).transposed(), output_gradient_matrix(), split_k_factor, param_gradient_beta);
-	}
+		memopt_adapter::Task task = [
+			&,
+			tmp_idx,
+			split_k_factor,
+			param_gradient_beta
+		](std::map<void*, void*> addressUpdate, cudaStream_t stream) {
+			fc_multiply_split_k<LastLayerK>(
+				stream,
+				tmp_dL_doutput,
+				forward.hidden.at(tmp_idx).transposed(),
+				output_gradient_matrix(),
+				split_k_factor,
+				param_gradient_beta
+			);
+		};
+    memopt_adapter::register_and_execute_task(
+      {tmp_dL_doutput.data(), forward.hidden.at(tmp_idx).data()},
+      {},
+      task,
+      multi_streams.back().get(1)
+    );
+  }
 
-	preflight::registerKernel(stream, {
-		(GPUMatrixBase *)&output_weight_matrix(use_inference_params),
-		(GPUMatrixBase *)&dL_doutput,
-		(GPUMatrixBase *)&forward.hidden.at(tmp_idx),
-		(GPUMatrixBase *)&backward_tmp.at(backward_tmp_idx)
-	});
 	if (!m_can_fuse_activation) {
-		fc_multiply<FullLayer>(stream, output_weight_matrix(use_inference_params).transposed(), tmp_dL_doutput, backward_tmp.at(backward_tmp_idx));
-		activation_backward_gpu(stream, m_activation, forward.hidden.at(tmp_idx-1), backward_tmp.at(backward_tmp_idx));
+    // Currently not supported
+    assert(false);
 	} else {
-		fc_multiply<FullLayer>(stream, output_weight_matrix(use_inference_params).transposed(), tmp_dL_doutput, forward.hidden.at(tmp_idx), backward_tmp.at(backward_tmp_idx), m_activation, true);
+		memopt_adapter::Task task = [
+			&,
+			use_inference_params,
+			tmp_idx,
+			backward_tmp_idx
+		](std::map<void*, void*> addressUpdate, cudaStream_t stream) {
+			fc_multiply<FullLayer>(
+				stream,
+				output_weight_matrix(use_inference_params).transposed(),
+				tmp_dL_doutput,
+				forward.hidden.at(tmp_idx),
+				forward.backward_tmp.at(backward_tmp_idx),
+				m_activation,
+				true
+			);
+		};
+		memopt_adapter::register_and_execute_task(
+			{tmp_dL_doutput.data(), forward.hidden.at(tmp_idx).data()},
+			{forward.backward_tmp.at(backward_tmp_idx).data()},
+			task,
+			stream
+		);
 	}
 
 	tmp_idx -= m_can_fuse_activation ? 1 : 2;
@@ -385,26 +443,57 @@ void CutlassMLP<T>::backward_impl(
 
 		if (param_gradients_mode != GradientMode::Ignore) {
 			multi_streams.emplace_back(stream, 2);
-			preflight::registerKernel(stream, {
-				(GPUMatrixBase *)&backward_tmp.at(backward_tmp_idx-1),
-				(GPUMatrixBase *)&forward.hidden.at(tmp_idx),
-				(GPUMatrixBase *)&gradient_matrix_at(matrix_idx)
-			});
-			fc_multiply_split_k<FullLayerK>(multi_streams.back().get(1), backward_tmp.at(backward_tmp_idx-1), forward.hidden.at(tmp_idx).transposed(), gradient_matrix_at(matrix_idx), split_k_factor, param_gradient_beta);
-		}
+			memopt_adapter::Task task = [
+				&,
+				backward_tmp_idx,
+				tmp_idx,
+				matrix_idx,
+				split_k_factor,
+				param_gradient_beta
+			](std::map<void*, void*> addressUpdate, cudaStream_t stream) {
+				fc_multiply_split_k<FullLayerK>(
+					stream,
+					forward.backward_tmp.at(backward_tmp_idx-1),
+					forward.hidden.at(tmp_idx).transposed(),
+					gradient_matrix_at(matrix_idx),
+					split_k_factor,
+					param_gradient_beta);
+			};
+      memopt_adapter::register_and_execute_task(
+        {forward.backward_tmp.at(backward_tmp_idx - 1).data(), forward.hidden.at(tmp_idx).data()},
+        {},
+        task,
+        multi_streams.back().get(1)
+      );
+    }
 
-    preflight::registerKernel(stream, {
-      (GPUMatrixBase *)&weight_matrix_at(use_inference_params, matrix_idx),
-			(GPUMatrixBase *)&backward_tmp.at(backward_tmp_idx-1),
-			(GPUMatrixBase *)&forward.hidden.at(tmp_idx),
-			(GPUMatrixBase *)&backward_tmp.at(backward_tmp_idx)
-    });
     if (!m_can_fuse_activation) {
-			fc_multiply<FullLayer>(stream, weight_matrix_at(use_inference_params, matrix_idx).transposed(), backward_tmp.at(backward_tmp_idx-1), backward_tmp.at(backward_tmp_idx));
-			activation_backward_gpu(stream, m_activation, forward.hidden.at(tmp_idx-1), backward_tmp.at(backward_tmp_idx));
+      // Currently not supported
+      assert(false);
 		} else {
-			fc_multiply<FullLayer>(stream, weight_matrix_at(use_inference_params, matrix_idx).transposed(), backward_tmp.at(backward_tmp_idx-1), forward.hidden.at(tmp_idx), backward_tmp.at(backward_tmp_idx), m_activation, true);
-		}
+			memopt_adapter::Task task = [
+				&,
+				use_inference_params,
+				matrix_idx,
+				backward_tmp_idx,
+				tmp_idx
+			](std::map<void*, void*> addressUpdate, cudaStream_t stream) {
+				fc_multiply<FullLayer>(
+					stream,
+					weight_matrix_at(use_inference_params, matrix_idx).transposed(),
+					forward.backward_tmp.at(backward_tmp_idx-1),
+					forward.hidden.at(tmp_idx),
+					forward.backward_tmp.at(backward_tmp_idx),
+					m_activation,
+					true);
+			};
+      memopt_adapter::register_and_execute_task(
+        {forward.backward_tmp.at(backward_tmp_idx-1).data(), forward.hidden.at(tmp_idx).data()},
+        {forward.backward_tmp.at(backward_tmp_idx).data()},
+        task,
+        stream
+      );
+    }
 
 		tmp_idx -= m_can_fuse_activation ? 1 : 2;
 		++backward_tmp_idx;
@@ -412,23 +501,48 @@ void CutlassMLP<T>::backward_impl(
 
 	if (param_gradients_mode != GradientMode::Ignore) {
 		multi_streams.emplace_back(stream, 2);
-		preflight::registerKernel(stream, {
-			(GPUMatrixBase *)&backward_tmp.at(backward_tmp_idx-1),
-			(GPUMatrixBase *)&input,
-			(GPUMatrixBase *)&input_gradient_matrix()
-		});
-		fc_multiply_split_k<FullLayerK>(multi_streams.back().get(1), backward_tmp.at(backward_tmp_idx-1), input.transposed(), input_gradient_matrix(), split_k_factor, param_gradient_beta);
-	}
+		memopt_adapter::Task task = [
+			&,
+			backward_tmp_idx,
+			split_k_factor,
+			param_gradient_beta
+		](std::map<void*, void*> addressUpdate, cudaStream_t stream) {
+			fc_multiply_split_k<FullLayerK>(
+				stream,
+				forward.backward_tmp.at(backward_tmp_idx-1),
+				input.transposed(),
+				input_gradient_matrix(),
+				split_k_factor,
+				param_gradient_beta
+			);
+		};
+    memopt_adapter::register_and_execute_task(
+      {forward.backward_tmp.at(backward_tmp_idx-1).data()},
+      {},
+      task,
+      multi_streams.back().get(1)
+    );
+  }
 
 	// If requested, compute sensitivity of loss w.r.t. inputs
 	if (dL_dinput) {
-		// optimization opportunity to only compute sensitivity w.r.t selected SUBSET of inputs. Useful for NFs, where conditional dims stay the same.
-		preflight::registerKernel(stream, {
-			(GPUMatrixBase *)&input_weight_matrix(use_inference_params),
-			(GPUMatrixBase *)&backward_tmp.at(backward_tmp_idx-1),
-			(GPUMatrixBase *)dL_dinput
-		});
-		fc_multiply<FullLayer>(stream, input_weight_matrix(use_inference_params).transposed(), backward_tmp.at(backward_tmp_idx-1), *dL_dinput);
+		memopt_adapter::Task task = [
+			&, use_inference_params, backward_tmp_idx, dL_dinput
+		](std::map<void*, void*> addressUpdate, cudaStream_t stream) {
+			// optimization opportunity to only compute sensitivity w.r.t selected SUBSET of inputs. Useful for NFs, where conditional dims stay the same.
+			fc_multiply<FullLayer>(
+				stream,
+				input_weight_matrix(use_inference_params).transposed(),
+				forward.backward_tmp.at(backward_tmp_idx - 1),
+				*dL_dinput
+			);
+		};
+		memopt_adapter::register_and_execute_task(
+			{},
+			{},
+			task,
+			stream
+		);
 	}
 }
 
