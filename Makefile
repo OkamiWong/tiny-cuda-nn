@@ -16,7 +16,7 @@ clean:
 
 .PHONY: run
 run:
-	./build/mlp_learning_an_image data/images/albert.jpg data/config_mem.json 1000 inference.jpg
+	./build/mlp_learning_an_image data/images/albert.jpg data/config_mem.json 1001
 
 .PHONY: run-steps
 run-steps:
