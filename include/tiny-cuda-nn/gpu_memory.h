@@ -33,7 +33,6 @@
 #pragma once
 
 #include <tiny-cuda-nn/common_host.h>
-#include <tiny-cuda-nn/cuda_graph.h>
 
 #include <cuda.h>
 

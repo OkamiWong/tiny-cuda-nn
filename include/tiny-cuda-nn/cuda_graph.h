@@ -36,7 +36,7 @@
 #include <deque>
 #include <functional>
 
-#include <memopt.hpp>
+#include <memopt-adapter/adapter.h>
 
 namespace tcnn {
 

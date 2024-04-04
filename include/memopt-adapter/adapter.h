@@ -1,10 +1,11 @@
 #pragma once
 
+#include <functional>
+
 #include <tiny-cuda-nn/gpu_matrix.h>
 
 #include <memopt.hpp>
 
-#include <functional>
 
 namespace memopt_adapter {
 
