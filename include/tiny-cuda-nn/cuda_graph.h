@@ -36,6 +36,8 @@
 #include <deque>
 #include <functional>
 
+#include <memopt.hpp>
+
 namespace tcnn {
 
 class CudaGraph;
@@ -146,13 +148,18 @@ public:
 #endif
 			}
 
-			if (!m_graph_instance) {
-				CUDA_CHECK_THROW(cudaGraphInstantiate(&m_graph_instance, m_graph, NULL, NULL, 0));
-			}
+			// if (!m_graph_instance) {
+			// 	CUDA_CHECK_THROW(cudaGraphInstantiate(&m_graph_instance, m_graph, NULL, NULL, 0));
+			// }
+
+			// CUDA_CHECK_THROW(cudaGraphLaunch(m_graph_instance, stream));
 
 			CUDA_CHECK_THROW(cudaGraphDebugDotPrint(m_graph, "graph.dot", 0));
 
-			CUDA_CHECK_THROW(cudaGraphLaunch(m_graph_instance, stream));
+			auto optimizedGraph = memopt::profileAndOptimize(m_graph);
+
+			// Currently only try optimizing once
+			assert(false);
 		}};
 	}
 
