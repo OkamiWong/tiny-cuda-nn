@@ -35,9 +35,6 @@
 #include <stbi/stbi_wrapper.h>
 
 #include <memopt-adapter/adapter.h>
-#include <memopt-adapter/preflight.h>
-
-#include <memopt.hpp>
 
 #include <chrono>
 #include <cstdlib>
@@ -311,7 +308,6 @@ int main(int argc, char* argv[]) {
 		}
 	}
 
-  preflight::printResult();
   printf("total_registered_array_bytes (MiB): %.6lf\n", (double)memopt_adapter::total_registered_array_bytes() / 1024.0 / 1024.0);
   printf("peak_memory_usage (MiB): %.6lf\n", (double)peak_memory_usage_profiler.end() / 1024.0 / 1024.0);
 
