@@ -105,7 +105,7 @@ __global__ void eval_image(uint32_t n_elements, cudaTextureObject_t texture, flo
 
 int main(int argc, char* argv[]) {
 	memopt::ConfigurationManager::exportDefaultConfiguration();
-	memopt::ConfigurationManager::initialize(0, nullptr);
+	memopt::ConfigurationManager::loadConfiguration();
 
 	set_cuda_device(memopt::Constants::DEVICE_ID);
 
