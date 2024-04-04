@@ -38,6 +38,7 @@ inline void register_and_execute_task(
   cudaStream_t stream
 ) {
   auto taskId = tasks.size();
+  tasks.push_back(task);
   memopt::annotateNextTask(taskId, inputs, outputs, stream);
   task({}, stream);
 }
