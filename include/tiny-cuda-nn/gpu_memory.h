@@ -404,6 +404,10 @@ public:
     }
 
     ~Allocation() {
+			if (!m_data) {
+				return;
+			}
+
 			// Debt: Abort upon error instead of just printing
       if (m_stream) {
 				CUDA_CHECK_PRINT(cudaFreeAsync(m_data, m_stream));
