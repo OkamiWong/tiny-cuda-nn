@@ -223,7 +223,7 @@ std::unique_ptr<Context> CutlassMLP<T>::forward_alloc(cudaStream_t stream, const
   // Originally allocated in backward propagation
 	forward->backward_tmp.resize(num_forward_activations());
   for (uint32_t i = 0; i < num_forward_activations(); ++i) {
-    forward->backward_tmp[i] = GPUMatrix<T>{m_network_width, batch_size, stream};
+    forward->backward_tmp[i] = GPUMatrix<T>{m_network_width, batch_size, nullptr};
 		memopt_adapter::register_array(forward->backward_tmp[i]);
   }
 
@@ -250,9 +250,10 @@ void CutlassMLP<T>::forward_impl(cudaStream_t stream, Context &ctx, const GPUMat
 
 	memopt_adapter::Task task = [
 		&,
+		this,
 		use_inference_params,
 		tmp_idx
-	](std::map<void*, void*> addressUpdate, cudaStream_t stream) {
+	](cudaStream_t stream) {
 		bool fused = compute_layer<FullLayer>(
 			stream,
 			false,
@@ -280,10 +281,11 @@ void CutlassMLP<T>::forward_impl(cudaStream_t stream, Context &ctx, const GPUMat
   for (uint32_t i = 0; i < m_n_hidden_matmuls; ++i) {
 		memopt_adapter::Task task = [
 			&,
+			this,
 			use_inference_params,
 			tmp_idx,
 			i
-		](std::map<void*, void*> addressUpdate, cudaStream_t stream) {
+		](cudaStream_t stream) {
 			bool fused = compute_layer<FullLayer>(
 				stream,
 				false,
@@ -311,9 +313,11 @@ void CutlassMLP<T>::forward_impl(cudaStream_t stream, Context &ctx, const GPUMat
   if (output) {
 		memopt_adapter::Task task = [
 			&,
+			this,
 			output,
-			use_inference_params
-		](std::map<void*, void*> addressUpdate, cudaStream_t stream) {
+			use_inference_params,
+			tmp_idx
+		](cudaStream_t stream) {
 			compute_layer<LastLayer>(
 				stream,
 				false,
@@ -348,7 +352,6 @@ void CutlassMLP<T>::backward_impl(
 	uint32_t batch_size = dL_doutput.n();
 
 	// Compute transfer of output activation in-place... it's treated specially for performance reasons
-	GPUMatrixDynamic<T> backward_output_tmp;
 	if (m_output_activation != Activation::None) {
 		// Currently not supported
 		assert(false);
@@ -369,7 +372,7 @@ void CutlassMLP<T>::backward_impl(
 
 	// Currently output activation is not supported
 	assert(m_output_activation == Activation::None);
-	const GPUMatrixDynamic<T>& tmp_dL_doutput = m_output_activation == Activation::None ? dL_doutput : backward_output_tmp;
+	const GPUMatrixDynamic<T>& tmp_dL_doutput = dL_doutput;
 
 	// If there are no hidden layers, the network is just a simple matmul
 	if (m_n_hidden_layers == 0) {
@@ -385,10 +388,11 @@ void CutlassMLP<T>::backward_impl(
 		multi_streams.emplace_back(stream, 2);
 		memopt_adapter::Task task = [
 			&,
+			this,
 			tmp_idx,
 			split_k_factor,
 			param_gradient_beta
-		](std::map<void*, void*> addressUpdate, cudaStream_t stream) {
+		](cudaStream_t stream) {
 			fc_multiply_split_k<LastLayerK>(
 				stream,
 				tmp_dL_doutput,
@@ -412,10 +416,11 @@ void CutlassMLP<T>::backward_impl(
 	} else {
 		memopt_adapter::Task task = [
 			&,
+			this,
 			use_inference_params,
 			tmp_idx,
 			backward_tmp_idx
-		](std::map<void*, void*> addressUpdate, cudaStream_t stream) {
+		](cudaStream_t stream) {
 			fc_multiply<FullLayer>(
 				stream,
 				output_weight_matrix(use_inference_params).transposed(),
@@ -445,12 +450,13 @@ void CutlassMLP<T>::backward_impl(
 			multi_streams.emplace_back(stream, 2);
 			memopt_adapter::Task task = [
 				&,
+				this,
 				backward_tmp_idx,
 				tmp_idx,
 				matrix_idx,
 				split_k_factor,
 				param_gradient_beta
-			](std::map<void*, void*> addressUpdate, cudaStream_t stream) {
+			](cudaStream_t stream) {
 				fc_multiply_split_k<FullLayerK>(
 					stream,
 					forward.backward_tmp.at(backward_tmp_idx-1),
@@ -473,11 +479,12 @@ void CutlassMLP<T>::backward_impl(
 		} else {
 			memopt_adapter::Task task = [
 				&,
+				this,
 				use_inference_params,
 				matrix_idx,
 				backward_tmp_idx,
 				tmp_idx
-			](std::map<void*, void*> addressUpdate, cudaStream_t stream) {
+			](cudaStream_t stream) {
 				fc_multiply<FullLayer>(
 					stream,
 					weight_matrix_at(use_inference_params, matrix_idx).transposed(),
@@ -503,10 +510,11 @@ void CutlassMLP<T>::backward_impl(
 		multi_streams.emplace_back(stream, 2);
 		memopt_adapter::Task task = [
 			&,
+			this,
 			backward_tmp_idx,
 			split_k_factor,
 			param_gradient_beta
-		](std::map<void*, void*> addressUpdate, cudaStream_t stream) {
+		](cudaStream_t stream) {
 			fc_multiply_split_k<FullLayerK>(
 				stream,
 				forward.backward_tmp.at(backward_tmp_idx-1),
@@ -527,8 +535,8 @@ void CutlassMLP<T>::backward_impl(
 	// If requested, compute sensitivity of loss w.r.t. inputs
 	if (dL_dinput) {
 		memopt_adapter::Task task = [
-			&, use_inference_params, backward_tmp_idx, dL_dinput
-		](std::map<void*, void*> addressUpdate, cudaStream_t stream) {
+			&, this, use_inference_params, backward_tmp_idx, dL_dinput
+		](cudaStream_t stream) {
 			// optimization opportunity to only compute sensitivity w.r.t selected SUBSET of inputs. Useful for NFs, where conditional dims stay the same.
 			fc_multiply<FullLayer>(
 				stream,
@@ -538,8 +546,8 @@ void CutlassMLP<T>::backward_impl(
 			);
 		};
 		memopt_adapter::register_and_execute_task(
-			{},
-			{},
+			{forward.backward_tmp.at(backward_tmp_idx - 1).data()},
+			{dL_dinput->data()},
 			task,
 			stream
 		);
@@ -552,7 +560,7 @@ std::unique_ptr<typename CutlassMLP<T>::ForwardContext> CutlassMLP<T>::allocate_
 
 	forward->hidden.resize(num_forward_activations());
 	for (uint32_t i = 0; i < num_forward_activations(); ++i) {
-		forward->hidden[i] = GPUMatrix<T>{m_network_width, batch_size, stream};
+		forward->hidden[i] = GPUMatrix<T>{m_network_width, batch_size, nullptr};
 		memopt_adapter::register_array(forward->hidden[i]);
 	}
 

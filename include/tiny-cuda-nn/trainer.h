@@ -112,17 +112,17 @@ public:
 
     auto forward = std::make_shared<ForwardContext>();
 
-    forward->output = GPUMatrix<COMPUTE_T>{m_model->padded_output_width(), batch_size, stream};
+    forward->output = GPUMatrix<COMPUTE_T>{m_model->padded_output_width(), batch_size, nullptr};
 		memopt_adapter::register_array(forward->output);
 
     forward->model_ctx = m_model->forward_alloc(stream, input, &forward->output, use_inference_params, prepare_input_gradients);
 
     if (m_perturbation_sigma > 0) {
-      forward->perturbed_output = GPUMatrix<COMPUTE_T>{m_model->padded_output_width(), batch_size, stream};
+      forward->perturbed_output = GPUMatrix<COMPUTE_T>{m_model->padded_output_width(), batch_size, nullptr};
 			memopt_adapter::register_array(forward->perturbed_output);
     }
 
-    forward->L = GPUMatrix<float>{m_model->padded_output_width(), batch_size, stream};
+    forward->L = GPUMatrix<float>{m_model->padded_output_width(), batch_size, nullptr};
 		memopt_adapter::register_array(forward->L);
 
     if (external_dL_dy) {
@@ -130,12 +130,11 @@ public:
       CHECK_THROW(external_dL_dy->n() == batch_size);
 
       forward->dL_doutput = GPUMatrix<COMPUTE_T>{external_dL_dy->data(), m_model->padded_output_width(), batch_size};
-			memopt_adapter::register_array(forward->dL_doutput);
     } else {
       CHECK_THROW(input.n() == target.n());
       CHECK_THROW(m_model->output_width() == target.m());
 
-      forward->dL_doutput = GPUMatrix<COMPUTE_T>{m_model->padded_output_width(), batch_size, stream};
+      forward->dL_doutput = GPUMatrix<COMPUTE_T>{m_model->padded_output_width(), batch_size, nullptr};
 			memopt_adapter::register_array(forward->dL_doutput);
     }
 
@@ -198,14 +197,32 @@ public:
     }
 
 		if (!m_graph.captured()){
-      auto capture_guard = m_graph.capture_guard(stream);
-      forward(stream, *m_training_ctx, loss_scale, input, target, data_pdf, use_inference_params, dL_dinput, external_dL_dy);
-      backward(stream, *m_training_ctx, input, dL_dinput, use_inference_params, param_gradients_mode);
-      if (run_optimizer) {
-        optimizer_step(stream, loss_scale);
-      }
+			{
+				auto capture_guard = m_graph.capture_guard(stream);
+				forward(stream, *m_training_ctx, loss_scale, input, target, data_pdf, use_inference_params, dL_dinput, external_dL_dy);
+				backward(stream, *m_training_ctx, input, dL_dinput, use_inference_params, param_gradients_mode);
+				if (run_optimizer) {
+					optimizer_step(stream, loss_scale);
+				}
+			}
+
+      CUDA_CHECK_THROW(cudaGraphDebugDotPrint(m_graph.graph(), "graph.dot", cudaGraphDebugDotFlagsVerbose));
+
+      auto optimized_graph = memopt::profileAndOptimize(m_graph.graph());
+
+			float running_time;
+  		std::map<void *, void *> managed_device_array_to_host_array_map;
+			memopt::executeOptimizedGraph(
+				optimized_graph,
+				memopt_adapter::execute_random_task,
+				running_time,
+				managed_device_array_to_host_array_map
+			);
+
+			printf("running_time of optimized_graph (s): %.6f\n", running_time);
     } else {
-			m_graph.execute_previous_graph(stream);
+			// Currently repeated execution is not supported
+			assert(false);
 		}
 
 		return m_training_ctx;

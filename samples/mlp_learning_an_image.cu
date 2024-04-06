@@ -104,7 +104,7 @@ int main(int argc, char* argv[]) {
 	memopt::ConfigurationManager::exportDefaultConfiguration();
 	memopt::ConfigurationManager::loadConfiguration();
 
-	set_cuda_device(memopt::Constants::DEVICE_ID);
+	memopt::initializeCudaDevice();
 
 	memopt::PeakMemoryUsageProfiler peak_memory_usage_profiler(100);
 	peak_memory_usage_profiler.start();

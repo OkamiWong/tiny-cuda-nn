@@ -36,6 +36,8 @@
 #include <tiny-cuda-nn/gpu_memory.h>
 #include <tiny-cuda-nn/network.h>
 
+#include <memopt-adapter/adapter.h>
+
 namespace tcnn {
 
 template <typename T>
@@ -86,9 +88,16 @@ public:
 
     auto forward = std::make_unique<ForwardContext>();
 
-    forward->network_input = GPUMatrixDynamic<T>{m_encoding->padded_output_width(), input.n(), stream, m_encoding->preferred_output_layout()};
+    forward->network_input = GPUMatrixDynamic<T>{m_encoding->padded_output_width(), input.n(), nullptr, m_encoding->preferred_output_layout()};
+		memopt_adapter::register_array(forward->network_input);
+
     forward->encoding_ctx = m_encoding->forward_alloc(stream, input, &forward->network_input, use_inference_params, prepare_input_gradients);
     forward->network_ctx = m_network->forward_alloc(stream, forward->network_input, output, use_inference_params, true);
+
+    if (m_encoding->n_params() > 0 || prepare_input_gradients) {
+      forward->dL_dnetwork_input = {m_encoding->padded_output_width(), input.n(), nullptr, m_encoding->preferred_output_layout()};
+			memopt_adapter::register_array(forward->dL_dnetwork_input);
+    }
 
     return forward;
   }
@@ -110,21 +119,16 @@ public:
 		bool use_inference_params = false,
 		GradientMode param_gradients_mode = GradientMode::Overwrite
 	) override {
-		GPUMatrixDynamic<T> dL_dnetwork_input;
-		if (m_encoding->n_params() > 0 || dL_dinput) {
-			dL_dnetwork_input = {m_encoding->padded_output_width(), input.n(), stream, m_encoding->preferred_output_layout()};
-		}
-
 		const auto& forward = dynamic_cast<const ForwardContext&>(ctx);
 
-		m_network->backward(stream, *forward.network_ctx, forward.network_input, output, dL_doutput, dL_dnetwork_input.data() ? &dL_dnetwork_input : nullptr, use_inference_params, param_gradients_mode);
-		if (dL_dnetwork_input.data()) {
+    m_network->backward(stream, *forward.network_ctx, forward.network_input, output, dL_doutput, forward.dL_dnetwork_input.data() ? (GPUMatrixDynamic<T> *)&forward.dL_dnetwork_input : nullptr, use_inference_params, param_gradients_mode);
+    if (forward.dL_dnetwork_input.data()) {
 			m_encoding->backward(
 				stream,
 				*forward.encoding_ctx,
 				input,
 				forward.network_input,
-				dL_dnetwork_input,
+				forward.dL_dnetwork_input,
 				dL_dinput,
 				use_inference_params,
 				param_gradients_mode
@@ -204,6 +208,7 @@ private:
 
 	struct ForwardContext : public Context {
 		GPUMatrixDynamic<T> network_input;
+		GPUMatrixDynamic<T> dL_dnetwork_input;
 		std::unique_ptr<Context> encoding_ctx;
 		std::unique_ptr<Context> network_ctx;
 	};

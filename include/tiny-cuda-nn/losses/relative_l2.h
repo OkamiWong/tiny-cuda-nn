@@ -99,11 +99,12 @@ public:
 
 		memopt_adapter::Task task = [
 			&,
+			this,
 			loss_scale,
 			data_pdf,
 			dims,
 			stride
-		](std::map<void*, void*> addressUpdate, cudaStream_t stream) {
+		](cudaStream_t stream) {
 			linear_kernel(relative_l2_loss<T>, 0, stream,
 				prediction.n_elements(),
 				stride,

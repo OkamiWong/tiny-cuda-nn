@@ -823,7 +823,7 @@ public:
     }
 
     if (prepare_input_gradients) {
-      forward->dy_dx = GPUMatrix<float, RM>{N_POS_DIMS * m_n_features, input.n(), stream};
+      forward->dy_dx = GPUMatrix<float, RM>{N_POS_DIMS * m_n_features, input.n(), nullptr};
 			memopt_adapter::register_array(forward->dy_dx);
     }
 
@@ -872,11 +872,12 @@ public:
 
     memopt_adapter::Task task = [
 			&,
+			this,
 			output,
 			use_inference_params,
 			num_elements,
 			blocks_hashgrid
-		](std::map<void*, void*> addressUpdate, cudaStream_t stream) {
+		](cudaStream_t stream) {
       T* encoded_positions_soa = output ? output->data() : nullptr;
       GPUMemoryArena::Allocation workspace;
       if (output && output->layout() == AoS) {
@@ -936,35 +937,22 @@ public:
 
 		const auto& forward = dynamic_cast<const ForwardContext&>(ctx);
 
-		const T* dL_dy_rm = dL_doutput.data();
 
-		GPUMemoryArena::Allocation workspace;
 		if (dL_doutput.layout() == CM) {
       // Currently not supported
       assert(false);
-
-      workspace = allocate_workspace(stream, num_elements * m_n_features * sizeof(T));
-
-			// Transpose dL_dy. Use the buffer previously occupied by the encoded positions
-			const dim3 threads_transpose = { m_n_levels * N_FEATURES_PER_LEVEL, 8, 1 };
-			const uint32_t blocks_transpose = div_round_up(num_elements, threads_transpose.y);
-			transpose_gradients<T><<<blocks_transpose, threads_transpose, 0, stream>>>(
-				num_elements,
-				(T*)workspace.data(),
-				dL_doutput.pitched_ptr()
-			);
-
-			dL_dy_rm = (const T*)workspace.data();
 		}
 
 		if (param_gradients_mode != GradientMode::Ignore) {
 			memopt_adapter::Task task = [
 				&,
+				this,
 				dL_dinput,
 				param_gradients_mode,
-				num_elements,
-				dL_dy_rm
-			](std::map<void*, void*> addressUpdate, cudaStream_t stream) {
+				num_elements
+			](cudaStream_t stream) {
+				const T* dL_dy_rm = dL_doutput.data();
+
 				// We accumulate gradients with grad_t precision, which, for performance reasons, is not always T.
 				// If not, accumulate in a temporary buffer and cast later.
 				grad_t* grid_gradient;
@@ -1009,7 +997,7 @@ public:
 				}
 			};
 			memopt_adapter::register_and_execute_task(
-				{forward.positions.data()},
+				{forward.positions.data(), output.data(), dL_doutput.data()},
 				{},
 				task,
 				stream
@@ -1022,14 +1010,6 @@ public:
 
     // Currently not supported
     assert(false);
-
-    linear_kernel(kernel_grid_backward_input<T, N_POS_DIMS>, 0, stream,
-			num_elements,
-			m_n_features,
-			dL_dy_rm,
-			forward.dy_dx.data(),
-			dL_dinput->view()
-		);
 	}
 
 	void backward_backward_input_impl(

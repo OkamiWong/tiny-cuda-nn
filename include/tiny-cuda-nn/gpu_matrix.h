@@ -51,6 +51,7 @@ class GPUMatrixBase {
 public:
 	virtual ~GPUMatrixBase() {}
 
+	virtual void try_updating_address(const std::map<void*, void*>& addressUpdateMap) = 0;
 	virtual size_t n_bytes() const = 0;
 	virtual void set_data_unsafe(void* data) = 0;
 
@@ -150,6 +151,15 @@ public:
 	GPUMatrixDynamic<T>& operator=(const GPUMatrixDynamic<T>& other) = delete;
 
 	virtual ~GPUMatrixDynamic() {}
+
+	void try_updating_address(const std::map<void*, void*>& addressUpdateMap) override {
+		if (m_original_data == nullptr) {
+			m_original_data = m_data;
+		}
+		if (addressUpdateMap.count(m_original_data) > 0) {
+			set_data_unsafe(addressUpdateMap.at(m_original_data));
+		}
+	}
 
 	void set_data_unsafe(void* data) override { m_data = (T*)data; }
 	void set_size_unsafe(uint32_t rows, uint32_t cols, uint32_t stride = 0) {
@@ -405,6 +415,7 @@ public:
 
 private:
 	T* m_data;
+	T* m_original_data = nullptr;
 	uint32_t m_rows, m_cols, m_stride;
 	MatrixLayout m_layout;
 

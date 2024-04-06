@@ -163,7 +163,7 @@ public:
 
 		uint32_t n_weights_to_optimize = n_weights();
 
-		memopt_adapter::Task task = [=](std::map<void*, void*> addressUpdate, cudaStream_t stream) {
+		memopt_adapter::Task task = [=](cudaStream_t stream) {
 			linear_kernel(adam_step<T>, 0, stream,
 				n_weights_to_optimize,
 				m_n_weights_covered_by_matrices,
