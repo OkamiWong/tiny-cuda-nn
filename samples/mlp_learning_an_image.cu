@@ -257,6 +257,8 @@ int main(int argc, char* argv[]) {
 			}
 		}
 
+		CUDA_CHECK_THROW(cudaDeviceSynchronize());
+
     std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
     std::cout << "time=" << std::chrono::duration_cast<std::chrono::microseconds>(end - begin).count() << "[µs]" << std::endl;
 
