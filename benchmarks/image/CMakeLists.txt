@@ -20,5 +20,5 @@
 # STRICT LIABILITY, OR TOR (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-add_executable(bench_image_ours bench_ours.cu ../../dependencies/stbi/stbi_wrapper.cpp)
-target_link_libraries(bench_image_ours PUBLIC ${CUDA_LIBRARIES} tiny-cuda-nn cublas)
+# add_executable(bench_image_ours bench_ours.cu ../../dependencies/stbi/stbi_wrapper.cpp)
+# target_link_libraries(bench_image_ours PUBLIC ${CUDA_LIBRARIES} tiny-cuda-nn cublas)
