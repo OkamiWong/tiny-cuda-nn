@@ -106,9 +106,6 @@ int main(int argc, char* argv[]) {
 
 	memopt::initializeCudaDevice();
 
-	memopt::PeakMemoryUsageProfiler peak_memory_usage_profiler(100);
-	peak_memory_usage_profiler.start();
-
 	uint32_t compute_capability = cuda_compute_capability();
 	if (compute_capability < MIN_GPU_ARCH) {
 		std::cerr
@@ -268,7 +265,6 @@ int main(int argc, char* argv[]) {
 	);
 
   printf("total_registered_array_bytes (MiB): %.6lf\n", (double)memopt_adapter::total_registered_array_bytes() / 1024.0 / 1024.0);
-  printf("peak_memory_usage (MiB): %.6lf\n", (double)peak_memory_usage_profiler.end() / 1024.0 / 1024.0);
 
   // Dump final image if a name was specified
 	if (argc >= 5) {
