@@ -28,11 +28,11 @@ clean:
 
 .PHONY: run
 run:
-	./build/mlp_learning_an_image data/images/albert.jpg data/config_mem.json 1001
+	./build/mlp_learning_an_image data/images/albert.jpg data/config_mem.json 1000 inference.jpg
 
 .PHONY: run-steps
 run-steps:
-	./build/mlp_learning_an_image data/images/albert.jpg data/config_mem.json $(STEPS) inference.jpg
+	./build/mlp_learning_an_image data/images/albert.jpg data/config_mem.json $(STEPS) $(INFERENCE)
 
 .PHONY: update-memopt
 update-memopt:
