@@ -242,17 +242,9 @@ int main(int argc, char* argv[]) {
 
 		std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
 
-		float tmp_loss = 0;
-		uint32_t tmp_loss_counter = 0;
-
 		std::cout << "Beginning optimization with " << n_training_steps << " training steps." << std::endl;
 
-		uint32_t interval = 10;
-
 		for (uint32_t i = 0; i < n_training_steps; ++i) {
-			bool print_loss = i % interval == 0;
-			bool visualize_learned_func = argc < 5 && i % interval == 0;
-
 			// Compute reference values at random coordinates
 			{
 				generate_random_uniform<float>(training_stream, rng, batch_size * n_input_dims, training_batch.data());
@@ -262,44 +254,13 @@ int main(int argc, char* argv[]) {
 			// Training step
 			{
 				auto ctx = trainer->training_step(training_stream, training_batch, training_target);
-
-				if (i % std::min(interval, (uint32_t)100) == 0) {
-					tmp_loss += trainer->loss(training_stream, *ctx);
-					++tmp_loss_counter;
-				}
-			}
-
-			// Debug outputs
-			{
-				if (print_loss) {
-					std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
-					std::cout << "Step#" << i << ": " << "loss=" << tmp_loss/(float)tmp_loss_counter << " time=" << std::chrono::duration_cast<std::chrono::microseconds>(end - begin).count() << "[µs]" << std::endl;
-
-					tmp_loss = 0;
-					tmp_loss_counter = 0;
-				}
-
-				if (visualize_learned_func) {
-					network->inference(inference_stream, inference_batch, prediction);
-					auto filename = fmt::format("{}.jpg", i);
-					std::cout << "Writing '" << filename << "'... ";
-					save_image(prediction.data(), sampling_width, sampling_height, 3, n_output_dims, filename);
-					std::cout << "done." << std::endl;
-				}
-
-				// Don't count visualizing as part of timing
-				// (assumes visualize_learned_pdf is only true when print_loss is true)
-				if (print_loss) {
-					begin = std::chrono::steady_clock::now();
-				}
-			}
-
-			if (print_loss && i > 0 && interval < 1000) {
-				interval *= 10;
 			}
 		}
 
-		// Dump final image if a name was specified
+    std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
+    std::cout << "time=" << std::chrono::duration_cast<std::chrono::microseconds>(end - begin).count() << "[µs]" << std::endl;
+
+    // Dump final image if a name was specified
 		if (argc >= 5) {
 			network->inference(inference_stream, inference_batch, prediction);
 			save_image(prediction.data(), sampling_width, sampling_height, 3, n_output_dims, argv[4]);
