@@ -1,0 +1,18 @@
+{
+  "acceptableRunningTimeFactor": 10.0,
+  "luleshConstrainIterationCount": true,
+  "luleshIterationBatchSize": 1,
+  "luleshS": 360,
+  "luleshTargetIterationCount": 100,
+  "measurePeakMemoryUsage": true,
+  "mergeConcurrentCudaGraphNodes": false,
+  "minManagedArraySize": 2097152,
+  "optimize": false,
+  "prefetchingBandwidthInGB": 260.0,
+  "repeat": 1,
+  "solver": "GUROBI_MIXED_INTEGER_PROGRAMMING",
+  "tiledCholeskyN": 40960,
+  "tiledCholeskyT": 4,
+  "useNvlink": true,
+  "verify": true
+}
