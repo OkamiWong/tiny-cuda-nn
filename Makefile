@@ -1,3 +1,5 @@
+all: build
+
 .PHONY: config
 config:
 	cmake -S . -B ./build -DCMAKE_BUILD_TYPE=RelWithDebInfo \
