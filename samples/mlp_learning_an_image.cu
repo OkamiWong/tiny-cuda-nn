@@ -258,6 +258,7 @@ int main(int argc, char* argv[]) {
 
 	// Training step
 	trainer->train(
+		false,
 		batch_size,
 		n_training_steps,
 		generate_training_data,
