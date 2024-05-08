@@ -179,7 +179,6 @@ class Trainer : public ObjectWithMutableHyperparams {
   }
 
   std::shared_ptr<ForwardContext> train(
-    bool optimizeMemoryUsage,
     uint32_t batch_size,
     uint32_t steps,
     std::function<void(cudaStream_t, uint32_t, GPUMatrixDynamic<T>&, GPUMatrix<float>&)> generateTrainingData,
@@ -225,7 +224,7 @@ class Trainer : public ObjectWithMutableHyperparams {
 
     CUDA_CHECK_THROW(cudaGraphDebugDotPrint(m_graph.graph(), "graph.dot", cudaGraphDebugDotFlagsVerbose));
 
-    if (optimizeMemoryUsage) {
+    if (memopt::ConfigurationManager::getConfig().optimize) {
       auto optimized_graph = memopt::profileAndOptimize(m_graph.graph());
 
       // TODO: Reset parameters after profiling
