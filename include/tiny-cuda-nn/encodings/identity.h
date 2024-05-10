@@ -116,7 +116,30 @@ public:
 		return std::make_unique<Context>();
 	}
 
-	void backward_impl(
+  void forward_impl(
+    cudaStream_t stream,
+    Context& ctx,
+    const GPUMatrixDynamic<float>& input,
+    GPUMatrixDynamic<T>* output = nullptr,
+    bool use_inference_params = false,
+    bool prepare_input_gradients = false
+  ) override {
+    if (!output || padded_output_width() == 0) {
+			return;
+		}
+
+		linear_kernel(identity<T>, 0, stream,
+			input.n() * padded_output_width(),
+			m_n_dims_to_encode,
+			m_n_to_pad,
+			m_scale,
+			m_offset,
+			input.view(),
+			output->view()
+		);
+  }
+
+  void backward_impl(
 		cudaStream_t stream,
 		const Context& ctx,
 		const GPUMatrixDynamic<float>& input,

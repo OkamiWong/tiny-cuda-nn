@@ -232,7 +232,7 @@ public:
     GPUMatrixDynamic<COMPUTE_T>* output = nullptr,
     bool use_inference_params = false,
     bool prepare_input_gradients = false
-  ) {}
+  ) { throw std::logic_error("not implemented"); }
   void forward(
     cudaStream_t stream,
     Context& ctx,
