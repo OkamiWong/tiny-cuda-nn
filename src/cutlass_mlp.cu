@@ -238,7 +238,7 @@ void CutlassMLP<T>::forward_impl(cudaStream_t stream, Context &ctx, const GPUMat
   if (m_n_hidden_layers == 0) {
     if (output) {
       // Currently not supported
-      assert(false);
+      CHECK_THROW(false);
 
       compute_layer<LastLayer>(stream, false, m_output_activation, input_weight_matrix(use_inference_params), input, *output, *output);
     }
@@ -265,7 +265,7 @@ void CutlassMLP<T>::forward_impl(cudaStream_t stream, Context &ctx, const GPUMat
 		);
 
 		// Limitation: Only support fusing layer computaion and activation
-		assert(fused);
+		CHECK_THROW(fused);
 	};
 	memopt_adapter::register_and_execute_task(
 		{},
@@ -297,7 +297,7 @@ void CutlassMLP<T>::forward_impl(cudaStream_t stream, Context &ctx, const GPUMat
 			);
 
 			// Limitation: Only support fusing layer computaion and activation
-			assert(fused);
+			CHECK_THROW(fused);
 		};
 		memopt_adapter::register_and_execute_task(
 			{forward.hidden.at(tmp_idx - 1).data()},
@@ -354,7 +354,7 @@ void CutlassMLP<T>::backward_impl(
 	// Compute transfer of output activation in-place... it's treated specially for performance reasons
 	if (m_output_activation != Activation::None) {
 		// Currently not supported
-		assert(false);
+		CHECK_THROW(false);
 	}
 
 	// Backprop
@@ -371,13 +371,13 @@ void CutlassMLP<T>::backward_impl(
 	int split_k_factor = batch_size / std::min((uint32_t)(1 << 12), batch_size);
 
 	// Currently output activation is not supported
-	assert(m_output_activation == Activation::None);
+	CHECK_THROW(m_output_activation == Activation::None);
 	const GPUMatrixDynamic<T>& tmp_dL_doutput = dL_doutput;
 
 	// If there are no hidden layers, the network is just a simple matmul
 	if (m_n_hidden_layers == 0) {
     // Currently not supported
-    assert(false);
+    CHECK_THROW(false);
 	}
 
 	uint32_t tmp_idx = (m_can_fuse_activation ? (m_n_hidden_matmuls+1) : ((m_n_hidden_matmuls+1) * 2)) - 1;
@@ -412,7 +412,7 @@ void CutlassMLP<T>::backward_impl(
 
 	if (!m_can_fuse_activation) {
     // Currently not supported
-    assert(false);
+    CHECK_THROW(false);
 	} else {
 		memopt_adapter::Task task = [
 			&,
@@ -475,7 +475,7 @@ void CutlassMLP<T>::backward_impl(
 
     if (!m_can_fuse_activation) {
       // Currently not supported
-      assert(false);
+      CHECK_THROW(false);
 		} else {
 			memopt_adapter::Task task = [
 				&,

@@ -850,7 +850,7 @@ public:
     // Take care of padding on the auxiliary stream
     if (output && m_n_to_pad > 0) {
       // Currently not supported
-      assert(false);
+      CHECK_THROW(false);
 
       if (output->layout() == AoS) {
         parallel_for_gpu_aos(synced_streams.get(1), num_elements, m_n_to_pad, [n_output_dims = m_n_output_dims, out = output->pitched_ptr()] __device__(size_t elem, size_t dim) {
@@ -940,7 +940,7 @@ public:
 
 		if (dL_doutput.layout() == CM) {
       // Currently not supported
-      assert(false);
+      CHECK_THROW(false);
 		}
 
 		if (param_gradients_mode != GradientMode::Ignore) {
@@ -1009,7 +1009,7 @@ public:
 		}
 
     // Currently not supported
-    assert(false);
+    CHECK_THROW(false);
 	}
 
 	void backward_backward_input_impl(

@@ -157,7 +157,7 @@ public:
 
 		// AdaBound paper: https://openreview.net/pdf?id=Bkg3g2R9FX
 		if (m_adabound) {
-			assert(false);
+			CHECK_THROW(false);
 			lower_lr_bound = 0.1f - 0.1f / ((1 - m_beta2) * (float)step() + 1);
 			upper_lr_bound = 0.1f + 0.1f / ((1 - m_beta2) * (float)step());
 		}
