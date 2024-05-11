@@ -226,6 +226,9 @@ int main(int argc, char* argv[]) {
 	cudaStream_t training_stream = inference_stream;
 
 	default_rng_t rng{1337};
+	int64_t *base_step;
+	CUDA_CHECK_THROW(cudaMalloc(&base_step, sizeof(int64_t)));
+	CUDA_CHECK_THROW(cudaMemset(base_step, 0, sizeof(int64_t)));
 
 	// Auxiliary matrices for evaluation
 	GPUMatrix<float> prediction(n_output_dims, n_coords_padded);
@@ -252,7 +255,7 @@ int main(int argc, char* argv[]) {
 		GPUMatrixDynamic<float>& input,
 		GPUMatrix<float>& target
 	) {
-		generate_random_uniform<float>(stream, rng, batch_size * n_input_dims, input.data());
+		generate_random_uniform<float>(stream, rng, base_step, batch_size * n_input_dims, input.data());
 		linear_kernel(eval_image<n_output_dims>, 0, stream, batch_size, texture, input.data(), target.data());
 	};
 
@@ -273,6 +276,8 @@ int main(int argc, char* argv[]) {
 	}
 
 	free_all_gpu_memory_arenas();
+
+	CUDA_CHECK_THROW(cudaFree(base_step));
 
 	return EXIT_SUCCESS;
 }

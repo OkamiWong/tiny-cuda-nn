@@ -84,4 +84,42 @@ void generate_random_logistic(RNG& rng, size_t n_elements, T* out, const T mean 
 	generate_random_logistic(nullptr, rng, n_elements, out, mean, stddev);
 }
 
+template <typename T, typename RNG, size_t N_TO_GENERATE, typename F>
+__global__ void generate_random_kernel(const size_t n_elements, RNG rng, const int64_t* base_step, T* __restrict__ out, const F transform) {
+  const size_t i = threadIdx.x + blockIdx.x * blockDim.x;
+  const size_t n_threads = blockDim.x * gridDim.x;
+
+  rng.advance(i * N_TO_GENERATE + *base_step);
+
+  TCNN_PRAGMA_UNROLL
+  for (size_t j = 0; j < N_TO_GENERATE; ++j) {
+    const size_t idx = i + n_threads * j;
+    if (idx >= n_elements) {
+      return;
+    }
+
+    out[idx] = transform((T)rng.next_float());
+  }
+}
+
+template <typename T, typename RNG, size_t N_TO_GENERATE>
+__global__ void advance_base_step(int64_t* base_step, int64_t delta) {
+  const size_t i = threadIdx.x + blockIdx.x * blockDim.x;
+	if (i != 0) return;
+	*base_step += delta;
+}
+
+template <typename T, typename RNG, typename F>
+void generate_random(cudaStream_t stream, RNG& rng, int64_t *base_step, size_t n_elements, T* out, F&& transform) {
+  static constexpr size_t N_TO_GENERATE = 4;
+
+  size_t n_threads = div_round_up(n_elements, N_TO_GENERATE);
+  generate_random_kernel<T, RNG, N_TO_GENERATE><<<n_blocks_linear(n_threads), N_THREADS_LINEAR, 0, stream>>>(n_elements, rng, base_step, out, transform);
+  advance_base_step<T, RNG, N_TO_GENERATE><<<1, 1, 0, stream>>>(base_step, n_elements);
+}
+
+template <typename T, typename RNG>
+void generate_random_uniform(cudaStream_t stream, RNG& rng, int64_t *base_step, size_t n_elements, T* out, const T lower = (T)0.0, const T upper = (T)1.0) {
+  generate_random(stream, rng, base_step, n_elements, out, [upper, lower] __device__(T val) { return val * (upper - lower) + lower; });
+}
 }
