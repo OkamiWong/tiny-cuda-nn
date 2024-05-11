@@ -7,7 +7,7 @@
   "measurePeakMemoryUsage": true,
   "mergeConcurrentCudaGraphNodes": false,
   "minManagedArraySize": 2097152,
-  "optimize": false,
+  "optimize": true,
   "prefetchingBandwidthInGB": 260.0,
   "repeat": 1,
   "solver": "GUROBI_MIXED_INTEGER_PROGRAMMING",
