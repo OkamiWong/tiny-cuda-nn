@@ -395,12 +395,17 @@ public:
 	class Allocation {
 	public:
 		Allocation() = default;
-    Allocation(cudaStream_t stream, size_t n_bytes) : m_stream{stream} {
+    Allocation(cudaStream_t stream, size_t n_bytes, bool use_unified_memory = false) : m_stream{stream} {
       if (m_stream) {
         CUDA_CHECK_THROW(cudaMallocAsync(&m_data, n_bytes, stream));
       } else {
-        CUDA_CHECK_THROW(cudaMalloc(&m_data, n_bytes));
-      }
+				if (use_unified_memory){
+					assert(stream == nullptr);
+					CUDA_CHECK_THROW(cudaMallocManaged(&m_data, n_bytes));
+				} else {
+	        CUDA_CHECK_THROW(cudaMalloc(&m_data, n_bytes));
+				}
+			}
     }
 
     ~Allocation() {
@@ -447,13 +452,13 @@ public:
 };
 
 
-inline GPUMemoryArena::Allocation allocate_workspace(cudaStream_t stream, size_t n_bytes) {
+inline GPUMemoryArena::Allocation allocate_workspace(cudaStream_t stream, size_t n_bytes, bool use_unified_memory = false) {
 	if (n_bytes == 0) {
 		// Return a null allocation if no bytes were requested.
 		return {};
 	}
 
-	return GPUMemoryArena::Allocation{stream, n_bytes};
+	return GPUMemoryArena::Allocation{stream, n_bytes, use_unified_memory};
 }
 
 inline size_t align_to_cacheline(size_t bytes) {

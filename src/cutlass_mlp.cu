@@ -223,7 +223,7 @@ std::unique_ptr<Context> CutlassMLP<T>::forward_alloc(cudaStream_t stream, const
   // Originally allocated in backward propagation
 	forward->backward_tmp.resize(num_forward_activations());
   for (uint32_t i = 0; i < num_forward_activations(); ++i) {
-    forward->backward_tmp[i] = GPUMatrix<T>{m_network_width, batch_size, nullptr};
+    forward->backward_tmp[i] = GPUMatrix<T>{m_network_width, batch_size, nullptr, memopt::ConfigurationManager::getConfig().generic.useUM};
 		memopt_adapter::register_array(forward->backward_tmp[i]);
   }
 
@@ -560,7 +560,7 @@ std::unique_ptr<typename CutlassMLP<T>::ForwardContext> CutlassMLP<T>::allocate_
 
 	forward->hidden.resize(num_forward_activations());
 	for (uint32_t i = 0; i < num_forward_activations(); ++i) {
-		forward->hidden[i] = GPUMatrix<T>{m_network_width, batch_size, nullptr};
+		forward->hidden[i] = GPUMatrix<T>{m_network_width, batch_size, nullptr, memopt::ConfigurationManager::getConfig().generic.useUM};
 		memopt_adapter::register_array(forward->hidden[i]);
 	}
 

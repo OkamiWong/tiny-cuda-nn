@@ -111,17 +111,17 @@ class Trainer : public ObjectWithMutableHyperparams {
 
     auto forward = std::make_shared<ForwardContext>();
 
-    forward->output = GPUMatrix<COMPUTE_T>{m_model->padded_output_width(), batch_size, nullptr};
+    forward->output = GPUMatrix<COMPUTE_T>{m_model->padded_output_width(), batch_size, nullptr, memopt::ConfigurationManager::getConfig().generic.useUM};
     memopt_adapter::register_array(forward->output);
 
     forward->model_ctx = m_model->forward_alloc(stream, input, &forward->output, use_inference_params, prepare_input_gradients);
 
     if (m_perturbation_sigma > 0) {
-      forward->perturbed_output = GPUMatrix<COMPUTE_T>{m_model->padded_output_width(), batch_size, nullptr};
+      forward->perturbed_output = GPUMatrix<COMPUTE_T>{m_model->padded_output_width(), batch_size, nullptr, memopt::ConfigurationManager::getConfig().generic.useUM};
       memopt_adapter::register_array(forward->perturbed_output);
     }
 
-    forward->L = GPUMatrix<float>{m_model->padded_output_width(), batch_size, nullptr};
+    forward->L = GPUMatrix<float>{m_model->padded_output_width(), batch_size, nullptr, memopt::ConfigurationManager::getConfig().generic.useUM};
     memopt_adapter::register_array(forward->L);
 
     if (external_dL_dy) {
@@ -133,7 +133,7 @@ class Trainer : public ObjectWithMutableHyperparams {
       CHECK_THROW(input.n() == target.n());
       CHECK_THROW(m_model->output_width() == target.m());
 
-      forward->dL_doutput = GPUMatrix<COMPUTE_T>{m_model->padded_output_width(), batch_size, nullptr};
+      forward->dL_doutput = GPUMatrix<COMPUTE_T>{m_model->padded_output_width(), batch_size, nullptr, memopt::ConfigurationManager::getConfig().generic.useUM};
       memopt_adapter::register_array(forward->dL_doutput);
     }
 
@@ -245,19 +245,45 @@ class Trainer : public ObjectWithMutableHyperparams {
       );
       printf("running_time of optimized_graph (s): %.6f\n", running_time);
     } else {
+      memopt::PeakMemoryUsageProfiler profiler;
+
       cudaGraphExec_t graphExec;
       CUDA_CHECK_THROW(cudaGraphInstantiate(&graphExec, m_graph.graph()));
       CUDA_CHECK_THROW(cudaGraphUpload(graphExec, stream));
       CUDA_CHECK_THROW(cudaStreamSynchronize(stream));
 
+      if (memopt::ConfigurationManager::getConfig().generic.useUM) {
+        size_t available = 1024ULL * 1024ULL * memopt::ConfigurationManager::getConfig().generic.availableMemoryForUMInMiB;
+        memopt::reduceAvailableMemoryForUM(available);
+
+        size_t sum = 0;
+        for (auto matrix : memopt_adapter::managedMatrices) {
+          if (sum + matrix->n_bytes() > available) break;
+          sum += matrix->n_bytes();
+          CUDA_CHECK_THROW(cudaMemPrefetchAsync(((GPUMatrixDynamic<COMPUTE_T>*)matrix)->data(), matrix->n_bytes(), memopt::ConfigurationManager::getConfig().execution.mainDeviceId, stream));
+        }
+        CUDA_CHECK_THROW(cudaStreamSynchronize(stream));
+      }
+
+      profiler.start();
+
       memopt::CudaEventClock clock;
       clock.start(stream);
       for (int i = 0; i < steps; i++) {
+        printf("i = %d\n", i);
         CUDA_CHECK_THROW(cudaGraphLaunch(graphExec, stream));
+        CUDA_CHECK_THROW(cudaStreamSynchronize(stream));
       }
       clock.end(stream);
       CUDA_CHECK_THROW(cudaStreamSynchronize(stream));
       printf("running_time of unoptimized graph (s): %.6f\n", clock.getTimeInSeconds());
+
+      size_t peakMem = profiler.end();
+      printf("peak memory usage (MiB): %.6lf\n", (double)peakMem / 1024.0 / 1024.0);
+
+      if (memopt::ConfigurationManager::getConfig().generic.useUM) {
+        memopt::resetAvailableMemoryForUM();
+      }
 
       CUDA_CHECK_THROW(cudaGraphExecDestroy(graphExec));
     }

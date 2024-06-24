@@ -823,7 +823,7 @@ public:
     }
 
     if (prepare_input_gradients) {
-      forward->dy_dx = GPUMatrix<float, RM>{N_POS_DIMS * m_n_features, input.n(), nullptr};
+      forward->dy_dx = GPUMatrix<float, RM>{N_POS_DIMS * m_n_features, input.n(), nullptr, memopt::ConfigurationManager::getConfig().generic.useUM};
 			memopt_adapter::register_array(forward->dy_dx);
     }
 
