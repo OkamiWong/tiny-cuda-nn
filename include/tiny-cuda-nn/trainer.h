@@ -224,7 +224,7 @@ class Trainer : public ObjectWithMutableHyperparams {
 
     CUDA_CHECK_THROW(cudaGraphDebugDotPrint(m_graph.graph(), "graph.dot", cudaGraphDebugDotFlagsVerbose));
 
-    if (memopt::ConfigurationManager::getConfig().optimize) {
+    if (memopt::ConfigurationManager::getConfig().generic.optimize) {
       auto optimized_graph = memopt::profileAndOptimize(m_graph.graph());
 
       // TODO: Reset parameters after profiling
