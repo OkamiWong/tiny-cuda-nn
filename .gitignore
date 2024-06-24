@@ -9,6 +9,7 @@ dist
 /*.jpg
 
 # Config
+tcnnConfig.json
 config.json
 currentConfig.json
 defaultConfig.json
